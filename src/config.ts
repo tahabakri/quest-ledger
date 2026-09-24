@@ -189,6 +189,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return parseConfig(readConfigSource(env), env);
 }
 
+/**
+ * Only the sheet tab names, for recovery tools like `npm run replay`: they must
+ * work even where unrelated settings (such as channel ID variables) are absent.
+ */
+export function readSheetTabs(env: NodeJS.ProcessEnv = process.env): { submissions: string; binds: string } {
+  const source = readConfigSource(env);
+  let doc: unknown;
+  try {
+    doc = parseYaml(source.text, { intAsBigInt: true });
+  } catch (err) {
+    throw new ConfigError(`${source.origin}: invalid YAML: ${(err as Error).message}`);
+  }
+  const sheets = (doc as { sheets?: unknown } | null)?.sheets ?? {};
+  const result = z
+    .looseObject({
+      binds_tab: z.string().trim().min(1).default('Binds'),
+      submissions_tab: z.string().trim().min(1).default('Submissions'),
+    })
+    .safeParse(interpolateEnv(sheets, env, new Set()));
+  if (!result.success) throw new ConfigError(`${source.origin}: invalid sheets settings`);
+  return { submissions: result.data.submissions_tab, binds: result.data.binds_tab };
+}
+
 export function parseConfig(source: ConfigSource, env: NodeJS.ProcessEnv = process.env): AppConfig {
   let doc: unknown;
   try {

@@ -29,6 +29,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "replay": "node dist/replay.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -45,6 +46,7 @@
     "vitest": "^5.0.1"
   },
   "dependencies": {
+    "@googleapis/sheets": "^18.0.1",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   }
