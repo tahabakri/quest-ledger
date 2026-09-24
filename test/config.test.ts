@@ -123,6 +123,14 @@ describe('config', () => {
     ['the reserved "unmatched" type', MINIMAL.replace('type: daily_check_in', 'type: unmatched'), /reserved/],
     ['an upper-case command name', MINIMAL.replace('id_label: uid', 'id_label: UID'), /bind\.id_label: must be lowercase/],
     ['invalid YAML', 'quests: [unclosed', /invalid YAML/],
+    [
+      'warnings that combine past Discord\'s 2000-character limit',
+      MINIMAL.replace('unmatched: No match.', `unmatched: "${'x'.repeat(1200)}"`).replace(
+        'unbound: Run /bind first.',
+        `unbound: "${'y'.repeat(900)}"`,
+      ),
+      /replies: combined warnings can reach 2125 characters/,
+    ],
   ])('rejects %s', (_label, text, expected) => {
     expect(configError(() => parse(text))).toMatch(expected);
   });

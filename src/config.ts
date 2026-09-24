@@ -37,7 +37,10 @@ const commandName = z
 
 const description = z.string().trim().min(1).max(100, 'Discord limits descriptions to 100 characters');
 
-// Leaves headroom under Discord's 2000-character limit for the mention and combined warnings.
+const DISCORD_MESSAGE_LIMIT = 2000;
+/** "<@" + a 20-digit ID + "> ". */
+const MENTION_ALLOWANCE = 24;
+
 const replyText = z.string().trim().min(1).max(1800);
 
 const questType = z
@@ -125,6 +128,16 @@ const RawConfigSchema = z
     });
     if (cfg.sheets.binds_tab === cfg.sheets.submissions_tab) {
       ctx.addIssue({ code: 'custom', path: ['sheets', 'submissions_tab'], message: 'must differ from binds_tab' });
+    }
+    // Worst case is one combined reply: "<@member> " + (unmatched or no_image) + "\n" + unbound.
+    const longest =
+      MENTION_ALLOWANCE + Math.max(cfg.replies.unmatched.length, cfg.replies.no_image.length) + 1 + cfg.replies.unbound.length;
+    if (longest > DISCORD_MESSAGE_LIMIT) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['replies'],
+        message: `combined warnings can reach ${longest} characters; Discord allows ${DISCORD_MESSAGE_LIMIT}. Shorten them.`,
+      });
     }
   });
 
