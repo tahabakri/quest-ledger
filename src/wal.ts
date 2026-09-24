@@ -42,6 +42,8 @@ export interface WalState {
  */
 export class WriteAheadLog {
   private fd: number | undefined;
+  /** Set when a partial line may be on disk (crash or failed write): the next entry starts a fresh line. */
+  private needsNewline = false;
 
   constructor(readonly path: string) {}
 
@@ -86,7 +88,7 @@ export class WriteAheadLog {
     if (size > 0) {
       const last = Buffer.alloc(1);
       readSync(this.fd, last, 0, 1, size - 1);
-      if (last[0] !== 0x0a) this.writeLine('');
+      this.needsNewline = last[0] !== 0x0a;
     }
     return state;
   }
@@ -106,10 +108,28 @@ export class WriteAheadLog {
     this.fd = undefined;
   }
 
+  /**
+   * Writes one whole line and fsyncs it, or throws. write(2) may store only part
+   * of a buffer (e.g. on a nearly full disk), so keep writing until done; if that
+   * fails midway, the fragment is left behind as a corrupt line and the next
+   * entry is started on a fresh one.
+   */
   private writeLine(json: string): void {
     if (this.fd === undefined) throw new Error(`write-ahead log ${this.path} is not open`);
-    writeSync(this.fd, `${json}\n`);
-    fsyncSync(this.fd);
+    const data = Buffer.from(`${this.needsNewline ? '\n' : ''}${json}\n`, 'utf8');
+    let offset = 0;
+    try {
+      while (offset < data.length) {
+        const written = writeSync(this.fd, data, offset, data.length - offset);
+        if (written <= 0) throw new Error(`could not write to ${this.path} (disk full?)`);
+        offset += written;
+      }
+      fsyncSync(this.fd);
+      this.needsNewline = false;
+    } catch (err) {
+      if (offset > 0) this.needsNewline = true;
+      throw err;
+    }
   }
 }
 
