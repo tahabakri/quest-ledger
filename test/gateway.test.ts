@@ -92,6 +92,23 @@ describe('Google Sheets gateway', () => {
     expect(api.values.batchUpdate).not.toHaveBeenCalled();
   });
 
+  it('re-checks headers with a single read', async () => {
+    api.values.batchGet.mockResolvedValue({ data: { valueRanges: [{ values: [['a', 'b']] }, { values: [['x', 'y']] }] } });
+    const tabs = [
+      { name: 'Submissions', headers: ['a', 'b'] },
+      { name: 'Binds', headers: ['x', 'y'] },
+    ];
+    await expect(gateway().checkHeaders(tabs)).resolves.toBeUndefined();
+    expect(api.values.batchGet).toHaveBeenCalledTimes(1);
+    expect(api.get).not.toHaveBeenCalled();
+
+    api.values.batchGet.mockResolvedValue({ data: { valueRanges: [{ values: [['a', 'notes', 'b']] }, { values: [['x', 'y']] }] } });
+    await expect(gateway().checkHeaders(tabs)).rejects.toBeInstanceOf(HeaderMismatchError);
+
+    api.values.batchGet.mockResolvedValue({ data: { valueRanges: [{}, { values: [['x', 'y']] }] } });
+    await expect(gateway().checkHeaders(tabs)).rejects.toThrow(/row 1 of "Submissions" is empty/);
+  });
+
   it('builds A1 references', () => {
     expect([0, 12, 25, 26, 27].map(columnLetter)).toEqual(['A', 'M', 'Z', 'AA', 'AB']);
     expect(quoteTab('Quest Log')).toBe("'Quest Log'");

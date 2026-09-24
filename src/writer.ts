@@ -156,8 +156,12 @@ export class SheetWriter {
         );
         return true;
       } catch (err) {
-        if (err instanceof HeaderMismatchError) throw err;
-        this.log.warn('could not read binds from the sheet; using cached binds', { err });
+        this.ready = false;
+        if (err instanceof HeaderMismatchError) {
+          this.log.error('cannot read binds: fix the sheet headers; using cached binds', { err });
+        } else {
+          this.log.warn('could not read binds from the sheet; using cached binds', { err });
+        }
         return false;
       }
     });
@@ -182,7 +186,8 @@ export class SheetWriter {
       if (!opts.force && this.now() < this.cooldownUntil) return false;
       const batch = this.queue.slice(0, this.maxBatchRows);
       if (!(await this.writeBatch(batch, opts.retries))) {
-        this.pause();
+        // Pausing only spaces out the timer-driven flushes; forced drains report back instead.
+        if (!opts.force) this.pause();
         return false;
       }
       this.cooldownMs = 0;
@@ -212,6 +217,8 @@ export class SheetWriter {
         return true;
       } catch (err) {
         for (const q of submissions) q.verify = true;
+        // The sheet may have changed shape (tab deleted or renamed): re-prepare it next time.
+        this.ready = false;
         const rows = binds.length + submissions.length;
         if (err instanceof HeaderMismatchError) {
           this.log.error('refusing to write: fix the sheet headers; rows are safe in the write-ahead log', {
@@ -241,12 +248,22 @@ export class SheetWriter {
     }
   }
 
+  /**
+   * Before every batch: the first time (or after a failure), create missing tabs
+   * and headers; otherwise re-check the headers with one read. Reviewers edit
+   * these sheets, and a column inserted mid-run would otherwise shift every row
+   * written after it into the wrong columns.
+   */
   private async ensureReady(): Promise<void> {
-    if (this.ready) return;
-    await this.gateway.prepareTabs([
+    const tabs = [
       { name: this.options.tabs.submissions, headers: SUBMISSION_HEADERS },
       { name: this.options.tabs.binds, headers: BIND_HEADERS },
-    ]);
+    ];
+    if (this.ready) {
+      await this.gateway.checkHeaders(tabs);
+      return;
+    }
+    await this.gateway.prepareTabs(tabs);
     this.ready = true;
   }
 

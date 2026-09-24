@@ -2,7 +2,7 @@ import { HeaderMismatchError, type SheetsGateway, type TabSpec } from '../src/sh
 import type { BindRow, Cell, SubmissionRow } from '../src/sheets/schema.js';
 import type { WalEntry } from '../src/wal.js';
 
-type Op = 'prepareTabs' | 'appendRows' | 'readRows' | 'readColumn' | 'updateRows';
+type Op = 'prepareTabs' | 'checkHeaders' | 'appendRows' | 'readRows' | 'readColumn' | 'updateRows';
 
 interface Failure {
   op: Op | undefined;
@@ -45,6 +45,18 @@ export class FakeSheets implements SheetsGateway {
         }
       }
       if (problems.length > 0) throw new HeaderMismatchError(`headers differ in ${problems.join(', ')}`);
+    });
+  }
+
+  checkHeaders(tabs: readonly TabSpec[]): Promise<void> {
+    return this.run('checkHeaders', undefined, undefined, () => {
+      for (const tab of tabs) {
+        const header = this.tabs.get(tab.name)?.[0];
+        if (!header || header.length === 0) throw new Error(`tab ${tab.name} missing or empty`);
+        if (header.slice(0, tab.headers.length).join('|') !== tab.headers.join('|')) {
+          throw new HeaderMismatchError(`headers differ in ${tab.name}`);
+        }
+      }
     });
   }
 

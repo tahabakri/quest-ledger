@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { BindStore, normalizeBindId } from '../src/binds.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BindStore, keepBindsFresh, normalizeBindId } from '../src/binds.js';
 import type { BindRow } from '../src/sheets/schema.js';
 
 const A = '100000000000000001';
@@ -86,6 +86,59 @@ describe('BindStore', () => {
     const store = new BindStore();
     store.loadHistory([store.prepare(A, 'member_a', '111111', T1), store.prepare(A, 'member_a', '222222', T2)]);
     expect(store.lookup(A)?.uid).toBe('222222');
+  });
+});
+
+describe('keepBindsFresh', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const results = (...outcomes: boolean[]) => {
+    const refresh = vi.fn(() => Promise.resolve(outcomes.shift() ?? true));
+    return refresh;
+  };
+
+  it('retries every 30s after a failed first load, then settles into the normal interval', async () => {
+    vi.useFakeTimers();
+    const refresh = results(false, false, true, true);
+    keepBindsFresh({ refresh, loaded: false, intervalMs: 600_000, retryMs: 30_000, onError: () => {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(3); // failed, failed, succeeded
+    await vi.advanceTimersByTimeAsync(599_999);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(4);
+  });
+
+  it('with periodic refresh off, still retries a failed first load until it succeeds', async () => {
+    vi.useFakeTimers();
+    const refresh = results(false, true);
+    keepBindsFresh({ refresh, loaded: false, intervalMs: 0, retryMs: 30_000, onError: () => {} });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('does nothing when loaded and periodic refresh is off', async () => {
+    vi.useFakeTimers();
+    const refresh = results();
+    keepBindsFresh({ refresh, loaded: true, intervalMs: 0, retryMs: 30_000, onError: () => {} });
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('treats a thrown refresh as a failure and keeps going', async () => {
+    vi.useFakeTimers();
+    const onError = vi.fn();
+    const refresh = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(true);
+    keepBindsFresh({ refresh, loaded: false, intervalMs: 600_000, retryMs: 30_000, onError });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 });
 

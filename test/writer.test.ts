@@ -204,6 +204,38 @@ describe('SheetWriter: failures', () => {
     expect(links(sheets)).toEqual([written, missing].map((r) => (r.kind === 'submission' ? r.row.message_link : '')));
   });
 
+  it('recreates a tab deleted while the bot runs, without a restart', async () => {
+    const { sheets, writer } = setup();
+    writer.record(submission());
+    await writer.flush();
+    sheets.tabs.delete(TABS.submissions); // someone deletes the tab mid-campaign
+    writer.record(submission());
+    await writer.flush();
+    expect(sheets.tabs.get(TABS.submissions)?.[0]).toEqual([...SUBMISSION_HEADERS]);
+    expect(sheets.dataRows(TABS.submissions)).toHaveLength(1);
+  });
+
+  it('stops writing, and keeps the rows, when a column is inserted mid-run', async () => {
+    const { sheets, writer } = setup();
+    writer.record(submission());
+    await writer.flush();
+    for (const row of sheets.tabs.get(TABS.submissions)!) row.splice(2, 0, 'notes'); // column inserted at C
+    writer.record(submission());
+    await writer.flush();
+    expect(sheets.callsOf('appendRows')).toHaveLength(1);
+    expect(writer.pendingCount).toBe(1);
+
+    for (const row of sheets.tabs.get(TABS.submissions)!) row.splice(2, 1); // reviewer moves it back
+    await expect(writer.drainAll()).resolves.toBe(true);
+    expect(sheets.dataRows(TABS.submissions)).toHaveLength(2);
+  });
+
+  it('refreshBinds reports mismatched headers instead of throwing', async () => {
+    const { sheets, writer } = setup();
+    sheets.tabs.set(TABS.binds, [['wrong']]);
+    await expect(writer.refreshBinds(() => {})).resolves.toBe(false);
+  });
+
   it('refuses to write under mismatched headers and keeps the rows', async () => {
     const { sheets, writer } = setup();
     sheets.tabs.set('Submissions', [['something', 'else']]);

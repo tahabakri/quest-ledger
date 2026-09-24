@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { Client, Events, GatewayIntentBits } from 'discord.js';
-import { BindStore } from './binds.js';
+import { BindStore, keepBindsFresh } from './binds.js';
 import { ConfigError, loadConfig } from './config.js';
 import { bindCommandData, createBindHandler, ephemeral } from './discord/bind-command.js';
 import { WarningReaper, createMessageHandler, fromDiscordMessage } from './discord/message-handler.js';
@@ -8,7 +8,7 @@ import { loadDotEnv, readDiscordEnv, readRuntimeEnv, readSheetsEnv } from './env
 import { LockError, acquireDataLock } from './lock.js';
 import { createLogger, describeError } from './logger.js';
 import { QuestMatcher } from './matcher.js';
-import { HeaderMismatchError, createGoogleSheetsGateway } from './sheets/gateway.js';
+import { createGoogleSheetsGateway } from './sheets/gateway.js';
 import { WAL_FILENAME, WriteAheadLog } from './wal.js';
 import { SheetWriter } from './writer.js';
 
@@ -46,22 +46,25 @@ async function main(): Promise<void> {
   });
   writer.restore(state);
 
-  // Binds: start from the log's history, then prefer the sheet when reachable.
-  // Unreachable is fine (rows wait in the log); wrong headers are fatal.
+  // Binds: start from the log's history, then prefer the sheet when it can be read.
+  // A sheet that is unreachable or misconfigured never stops the bot: submissions
+  // keep landing in the log, and writes resume once the sheet is fixed.
   const binds = new BindStore();
   binds.loadHistory(state.binds);
   const refreshBinds = () => writer.refreshBinds((rows, pending) => binds.replace(rows, pending));
-  const reachable = await refreshBinds();
-  log.info(reachable ? 'sheet reachable' : 'sheet unreachable; rows will wait in the write-ahead log', {
+  const loaded = await refreshBinds();
+  log.info(loaded ? 'sheet ready' : 'sheet not usable yet; rows will wait in the write-ahead log', {
     binds: binds.size,
   });
   writer.start();
   if (state.pending.length > 0) void writer.flush();
-  if (config.sheets.bindsRefreshMinutes > 0) {
-    setInterval(() => {
-      refreshBinds().catch((err: unknown) => log.error('binds refresh failed', { err }));
-    }, config.sheets.bindsRefreshMinutes * 60_000).unref();
-  }
+  keepBindsFresh({
+    refresh: refreshBinds,
+    loaded,
+    intervalMs: config.sheets.bindsRefreshMinutes * 60_000,
+    retryMs: 30_000,
+    onError: (err) => log.error('binds refresh failed', { err }),
+  });
 
   const client = new Client({
     // Message Content is a privileged intent: enable it in the Developer Portal.
@@ -149,7 +152,7 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   // Configuration problems are fatal and should say exactly what to fix.
-  if (err instanceof ConfigError || err instanceof LockError || err instanceof HeaderMismatchError) {
+  if (err instanceof ConfigError || err instanceof LockError) {
     process.stderr.write(`${err.message}\n`);
   } else {
     process.stderr.write(`fatal: ${describeError(err)}\n`);

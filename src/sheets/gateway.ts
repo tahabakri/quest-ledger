@@ -10,6 +10,8 @@ export interface TabSpec {
 export interface SheetsGateway {
   /** Creates missing tabs and writes headers into empty ones. Throws HeaderMismatchError if row 1 differs. */
   prepareTabs(tabs: readonly TabSpec[]): Promise<void>;
+  /** One read: throws HeaderMismatchError if row 1 differs, or an Error if a tab or its headers are gone. */
+  checkHeaders(tabs: readonly TabSpec[]): Promise<void>;
   /** Appends rows after the last row of the tab's table. */
   appendRows(tab: string, width: number, rows: Cell[][]): Promise<void>;
   /** Data rows (row 2 onwards) as displayed strings, padded to `width`. */
@@ -65,26 +67,7 @@ export function createGoogleSheetsGateway(options: GoogleSheetsOptions): SheetsG
         });
       }
 
-      const firstRows = await api.spreadsheets.values.batchGet({
-        spreadsheetId,
-        ranges: tabs.map((tab) => `${quoteTab(tab.name)}!1:1`),
-      });
-      const toInitialise: TabSpec[] = [];
-      const problems: string[] = [];
-      tabs.forEach((tab, i) => {
-        const row = (firstRows.data.valueRanges?.[i]?.values?.[0] ?? []).map((cell) => String(cell).trim());
-        if (row.every((cell) => cell === '')) {
-          toInitialise.push(tab);
-          return;
-        }
-        const actual = row.slice(0, tab.headers.length);
-        if (actual.join('\u0000') !== tab.headers.join('\u0000')) {
-          problems.push(`tab "${tab.name}" row 1 is [${actual.join(', ')}], expected [${tab.headers.join(', ')}]`);
-        }
-      });
-      if (problems.length > 0) {
-        throw new HeaderMismatchError(`Sheet headers do not match: ${problems.join('; ')}`);
-      }
+      const { empty: toInitialise } = compareHeaders(tabs, await readHeaderRows(api, spreadsheetId, tabs));
       if (toInitialise.length > 0) {
         await api.spreadsheets.values.batchUpdate({
           spreadsheetId,
@@ -96,6 +79,13 @@ export function createGoogleSheetsGateway(options: GoogleSheetsOptions): SheetsG
             })),
           },
         });
+      }
+    },
+
+    async checkHeaders(tabs) {
+      const { empty } = compareHeaders(tabs, await readHeaderRows(api, spreadsheetId, tabs));
+      if (empty.length > 0) {
+        throw new Error(`row 1 of "${empty.map((t) => t.name).join('", "')}" is empty; headers will be rewritten`);
       }
     },
 
@@ -138,6 +128,40 @@ export function createGoogleSheetsGateway(options: GoogleSheetsOptions): SheetsG
       });
     },
   };
+}
+
+async function readHeaderRows(
+  api: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabs: readonly TabSpec[],
+): Promise<string[][]> {
+  const res = await api.spreadsheets.values.batchGet({
+    spreadsheetId,
+    ranges: tabs.map((tab) => `${quoteTab(tab.name)}!1:1`),
+  });
+  return tabs.map((_, i) => (res.data.valueRanges?.[i]?.values?.[0] ?? []).map((cell) => String(cell).trim()));
+}
+
+/**
+ * Tabs whose row 1 is empty, or throws HeaderMismatchError if any row 1 differs
+ * from the expected headers. Extra columns to the right are fine.
+ */
+function compareHeaders(tabs: readonly TabSpec[], rows: string[][]): { empty: TabSpec[] } {
+  const empty: TabSpec[] = [];
+  const problems: string[] = [];
+  tabs.forEach((tab, i) => {
+    const row = rows[i] ?? [];
+    if (row.every((cell) => cell === '')) {
+      empty.push(tab);
+      return;
+    }
+    const actual = row.slice(0, tab.headers.length);
+    if (actual.join('\u0000') !== tab.headers.join('\u0000')) {
+      problems.push(`tab "${tab.name}" row 1 is [${actual.join(', ')}], expected [${tab.headers.join(', ')}]`);
+    }
+  });
+  if (problems.length > 0) throw new HeaderMismatchError(`Sheet headers do not match: ${problems.join('; ')}`);
+  return { empty };
 }
 
 /** A1-notation tab reference; always quoted so names with spaces or quotes work. */

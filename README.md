@@ -72,7 +72,12 @@ Anything that clears none of these is logged as `unmatched` with its full text. 
 
 ## The sheet
 
-Point the bot at any spreadsheet shared with its service account. On first write it creates the two tabs, if missing, with these headers in row 1. If a tab's row 1 has different headers, the bot refuses to write to it rather than scramble columns. You can add your own review columns to the right of these.
+Point the bot at any spreadsheet shared with its service account. It creates the two tabs, if missing, with these headers in row 1. The headers are re-checked before every batch:
+
+- **Different headers**, for example a column inserted in the middle: the bot stops writing rather than put values under the wrong columns. Submissions keep landing in the log, and writing resumes once the sheet is fixed.
+- **A deleted tab:** it is recreated.
+
+You can add your own review columns to the right of these.
 
 **`Binds`**, one row per member:
 

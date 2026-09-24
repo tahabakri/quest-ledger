@@ -77,6 +77,40 @@ export class BindStore {
 }
 
 /**
+ * Keeps the bind cache in step with the sheet: every `intervalMs` (0 = only
+ * until the first successful read), and every `retryMs` after a failed read,
+ * so a Sheets blip at startup doesn't leave bound members looking unbound for
+ * a whole interval. Returns a function that stops it.
+ */
+export function keepBindsFresh(options: {
+  refresh: () => Promise<boolean>;
+  /** Whether the sheet has already been read successfully. */
+  loaded: boolean;
+  intervalMs: number;
+  retryMs: number;
+  onError: (err: unknown) => void;
+}): () => void {
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const schedule = (loaded: boolean): void => {
+    const wait = loaded ? options.intervalMs : options.retryMs;
+    if (stopped || wait <= 0) return;
+    timer = setTimeout(() => {
+      options.refresh().then(schedule, (err: unknown) => {
+        options.onError(err);
+        schedule(false);
+      });
+    }, wait);
+    timer.unref();
+  };
+  schedule(options.loaded);
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}
+
+/**
  * Canonicalises a typed ID before validation: trims, folds full-width digits
  * (NFKC), and maps Arabic-Indic and Persian digits to ASCII, since members type
  * IDs on whatever keyboard they have.
