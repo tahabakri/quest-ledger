@@ -1,6 +1,9 @@
 import { join } from 'node:path';
+import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { BindStore } from './binds.js';
 import { ConfigError, loadConfig } from './config.js';
-import { loadDotEnv, readRuntimeEnv, readSheetsEnv } from './env.js';
+import { bindCommandData, createBindHandler, ephemeral } from './discord/bind-command.js';
+import { loadDotEnv, readDiscordEnv, readRuntimeEnv, readSheetsEnv } from './env.js';
 import { LockError, acquireDataLock } from './lock.js';
 import { createLogger, describeError } from './logger.js';
 import { HeaderMismatchError, createGoogleSheetsGateway } from './sheets/gateway.js';
@@ -13,6 +16,7 @@ async function main(): Promise<void> {
   const log = createLogger(env.logLevel);
   const config = loadConfig();
   const sheetsEnv = readSheetsEnv();
+  const discordEnv = readDiscordEnv();
 
   acquireDataLock(env.dataDir, 'bot');
   const wal = new WriteAheadLog(join(env.dataDir, WAL_FILENAME));
@@ -33,22 +37,79 @@ async function main(): Promise<void> {
   });
   writer.restore(state);
 
-  // One attempt to reach the sheet. Unreachable is fine (rows wait in the log);
-  // wrong headers are not, since every write would land in the wrong columns.
-  const reachable = await writer.refreshBinds(() => {});
-  log.info(reachable ? 'sheet reachable' : 'sheet unreachable; rows will wait in the write-ahead log');
+  // Binds: start from the log's history, then prefer the sheet when reachable.
+  // Unreachable is fine (rows wait in the log); wrong headers are fatal.
+  const binds = new BindStore();
+  binds.loadHistory(state.binds);
+  const refreshBinds = () => writer.refreshBinds((rows, pending) => binds.replace(rows, pending));
+  const reachable = await refreshBinds();
+  log.info(reachable ? 'sheet reachable' : 'sheet unreachable; rows will wait in the write-ahead log', {
+    binds: binds.size,
+  });
   writer.start();
   if (state.pending.length > 0) void writer.flush();
+  if (config.sheets.bindsRefreshMinutes > 0) {
+    setInterval(() => {
+      refreshBinds().catch((err: unknown) => log.error('binds refresh failed', { err }));
+    }, config.sheets.bindsRefreshMinutes * 60_000).unref();
+  }
+
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds],
+    // Bot messages never ping @everyone, roles or users unless a reply opts in.
+    allowedMentions: { parse: [] },
+  });
+  const handleBind = createBindHandler({ config: config.bind, store: binds, writer, log: log.child('bind') });
+
+  client.once(Events.ClientReady, (ready) => {
+    log.info('connected to Discord', { as: ready.user.tag });
+    ready.application.commands.set([bindCommandData(config.bind)], discordEnv.guildId).then(
+      () => log.info(`registered /${config.bind.command}`, { guild: discordEnv.guildId }),
+      (err: unknown) =>
+        log.error(
+          `could not register /${config.bind.command}; is the bot in server ${discordEnv.guildId}, ` +
+            'invited with the applications.commands scope?',
+          { err },
+        ),
+    );
+  });
+
+  client.on(Events.InteractionCreate, (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== config.bind.command) return;
+    if (interaction.guildId !== discordEnv.guildId) return;
+    handleBind(interaction).catch(async (err: unknown) => {
+      log.error('bind handler failed', { err });
+      await ephemeral(interaction, config.bind.replies.error).catch(() => undefined);
+    });
+  });
+
+  client.on(Events.Error, (err) => log.error('Discord client error', { err }));
+  client.on(Events.ShardDisconnect, (event) => log.warn('disconnected from Discord; reconnecting', { code: event.code }));
+  client.on(Events.ShardResume, () => log.info('reconnected to Discord'));
+  process.on('unhandledRejection', (err) => log.error('unhandled promise rejection', { err }));
 
   const shutdown = (signal: string) => {
     log.info('shutting down', { signal, pending: writer.pendingCount });
-    void writer.stop().finally(() => {
-      wal.close();
-      process.exit(0);
-    });
+    void client
+      .destroy()
+      .catch(() => undefined)
+      .then(() => writer.stop())
+      .finally(() => {
+        wal.close();
+        process.exit(0);
+      });
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+  try {
+    await client.login(discordEnv.token);
+  } catch (err) {
+    if ((err as { code?: unknown }).code === 'TokenInvalid') {
+      throw new ConfigError('Discord rejected DISCORD_BOT_TOKEN. Reset it in the Developer Portal (Bot tab) and update the variable.');
+    }
+    throw err;
+  }
 }
 
 main().catch((err: unknown) => {

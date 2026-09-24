@@ -25,6 +25,21 @@ export function readRuntimeEnv(env: NodeJS.ProcessEnv = process.env): RuntimeEnv
   };
 }
 
+export interface DiscordEnv {
+  token: string;
+  /** The one server the bot serves: /bind is registered here and other servers are ignored. */
+  guildId: string;
+}
+
+export function readDiscordEnv(env: NodeJS.ProcessEnv = process.env): DiscordEnv {
+  const token = required(env, 'DISCORD_BOT_TOKEN');
+  const guildId = required(env, 'GUILD_ID');
+  if (!/^\d{17,20}$/.test(guildId)) {
+    throw new ConfigError('GUILD_ID must be a Discord server ID (17-20 digits; enable Developer Mode, right-click the server, Copy Server ID)');
+  }
+  return { token, guildId };
+}
+
 export interface SheetsEnv {
   spreadsheetId: string;
   credentials: ServiceAccountCredentials;
