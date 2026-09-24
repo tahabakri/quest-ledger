@@ -59,6 +59,7 @@ function message(overrides: Partial<IncomingMessage> = {}) {
     id,
     guildId: GUILD,
     channelId: IMAGE_CHANNEL,
+    parentChannelId: null,
     channelName: 'submissions',
     authorId: BOUND_USER,
     authorUsername: 'member_a',
@@ -241,6 +242,30 @@ describe('link channel', () => {
     await handler(msg);
     expect(rows()[0]).toMatchObject({ bound: false, uid: '' });
     expect(reply).toHaveBeenCalledWith(`<@${UNBOUND_USER}> ${config.replies.unbound}`);
+  });
+});
+
+describe('threads and forum posts', () => {
+  const THREAD = '444444444444444444';
+
+  it('count toward their parent channel, logged under its name', async () => {
+    const { handler, rows } = setup();
+    const { msg, react } = message({ channelId: THREAD, parentChannelId: IMAGE_CHANNEL, channelName: 'submissions' });
+    await handler(msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'daily_check_in', channel_name: 'submissions', message_link: msg.url });
+    expect(react).toHaveBeenCalledWith('✅');
+  });
+
+  it('follow their parent channel mode (link threads log links)', async () => {
+    const { handler, rows } = setup();
+    await handler(message({ channelId: THREAD, parentChannelId: LINK_CHANNEL, content: 'https://example.com/t', attachments: [] }).msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'content_link', link_url: 'https://example.com/t' });
+  });
+
+  it('are ignored when the parent channel is not watched', async () => {
+    const { handler, recorded } = setup();
+    await handler(message({ channelId: THREAD, parentChannelId: OTHER_CHANNEL }).msg);
+    expect(recorded).toHaveLength(0);
   });
 });
 

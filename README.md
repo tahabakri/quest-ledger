@@ -47,7 +47,7 @@ flowchart LR
 | link | no link | none | none | none |
 | any | author never ran `/bind` | as above, `bound = FALSE` | as above | adds "run /bind first" |
 
-When several warnings apply to one message, they go out as one reply that mentions the member. Bots (including this one), webhooks, system messages, edits, other channels and other servers are ignored.
+When several warnings apply to one message, they go out as one reply that mentions the member. Threads, including forum posts, count as part of the channel they belong to, and are logged under that channel's name. Bots (including this one), webhooks, system messages, edits, other channels and other servers are ignored.
 
 ### Caption matching
 
@@ -122,14 +122,15 @@ You need Node.js 22.12 or newer, a Discord server you manage, and a Google accou
 4. **OAuth2 > URL Generator**: tick the scopes `bot` and `applications.commands`, then these bot permissions:
    - View Channels
    - Send Messages
+   - Send Messages in Threads
    - Add Reactions
    - Read Message History (needed to react to and reply to messages)
 
-   Manage Messages is not needed: the bot only deletes its own replies. The resulting URL looks like `https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=68672`.
+   Manage Messages is not needed: the bot only deletes its own replies. The resulting URL looks like `https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=274877975616`.
 5. Open the URL and add the bot to your server. Make sure it can see the channels you will watch.
 6. In Discord, enable **User Settings > Advanced > Developer Mode**. Then right-click the server to copy `GUILD_ID`, and right-click each channel to copy its ID for the config.
 
-`/bind` is registered as a server command in `GUILD_ID` at startup, so it appears immediately.
+At startup the bot registers `/bind` as a server command in `GUILD_ID`, so it appears immediately. It also logs a line for each watched channel: either `watching #name`, or the reason it can't (the channel wasn't found, or a named permission is missing).
 
 ### 2. Google service account
 

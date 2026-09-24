@@ -3,6 +3,7 @@ import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { BindStore, keepBindsFresh } from './binds.js';
 import { ConfigError, loadConfig } from './config.js';
 import { bindCommandData, createBindHandler, ephemeral } from './discord/bind-command.js';
+import { checkWatchedChannels } from './discord/channel-check.js';
 import { WarningReaper, createMessageHandler, fromDiscordMessage } from './discord/message-handler.js';
 import { loadDotEnv, readDiscordEnv, readRuntimeEnv, readSheetsEnv } from './env.js';
 import { LockError, acquireDataLock } from './lock.js';
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
 
   client.once(Events.ClientReady, (ready) => {
     log.info('connected to Discord', { as: ready.user.tag });
+    void checkWatchedChannels(ready, config.channels, discordEnv.guildId, log);
     ready.application.commands.set([bindCommandData(config.bind)], discordEnv.guildId).then(
       () => log.info(`registered /${config.bind.command}`, { guild: discordEnv.guildId }),
       (err: unknown) =>
@@ -104,6 +106,13 @@ async function main(): Promise<void> {
       log.error('bind handler failed', { err });
       await ephemeral(interaction, config.bind.replies.error).catch(() => undefined);
     });
+  });
+
+  // Join new threads (and forum posts) in watched channels so their messages are delivered.
+  const watchedIds = new Set(config.channels.map((c) => c.id));
+  client.on(Events.ThreadCreate, (thread) => {
+    if (thread.parentId === null || !watchedIds.has(thread.parentId) || thread.joined || !thread.joinable) return;
+    thread.join().catch((err: unknown) => log.warn('could not join a thread in a watched channel', { thread: thread.id, err }));
   });
 
   client.on(Events.MessageCreate, (message) => {

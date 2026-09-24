@@ -19,6 +19,9 @@ export interface IncomingMessage {
   id: string;
   guildId: string | null;
   channelId: string;
+  /** For messages in a thread or forum post: the channel the thread belongs to. */
+  parentChannelId: string | null;
+  /** The watched channel's name: the parent's, for messages in a thread. */
   channelName: string;
   authorId: string;
   authorUsername: string;
@@ -35,11 +38,14 @@ export interface IncomingMessage {
 
 export function fromDiscordMessage(message: Message): IncomingMessage {
   const channel = message.channel;
+  const thread = channel.isThread() ? channel : null;
+  const ownName = 'name' in channel && typeof channel.name === 'string' ? channel.name : '';
   return {
     id: message.id,
     guildId: message.guildId,
     channelId: message.channelId,
-    channelName: 'name' in channel && typeof channel.name === 'string' ? channel.name : '',
+    parentChannelId: thread?.parentId ?? null,
+    channelName: thread?.parent?.name ?? ownName,
     authorId: message.author.id,
     authorUsername: message.author.username,
     automated: message.author.bot || message.webhookId !== null || message.system,
@@ -101,7 +107,10 @@ export function createMessageHandler(deps: HandlerDeps) {
   return async (message: IncomingMessage): Promise<void> => {
     // Only new messages reach here: edits arrive as a different event and are ignored.
     if (message.automated || message.guildId !== deps.guildId) return;
-    const channel = channels.get(message.channelId);
+    // Threads (including forum posts) count as part of the channel they belong to.
+    const channel =
+      channels.get(message.channelId) ??
+      (message.parentChannelId === null ? undefined : channels.get(message.parentChannelId));
     if (!channel) return;
 
     const bind = deps.binds.lookup(message.authorId);
