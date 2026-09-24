@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { keywordProblems } from './matcher.js';
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -110,16 +111,9 @@ const RawConfigSchema = z
       .prefault({}),
   })
   .superRefine((cfg, ctx) => {
-    const seenKeywords = new Map<string, number>();
-    cfg.quests.forEach((quest, i) => {
-      const key = quest.keyword.toLowerCase();
-      const first = seenKeywords.get(key);
-      if (first !== undefined) {
-        ctx.addIssue({ code: 'custom', path: ['quests', i, 'keyword'], message: `duplicates quests[${first}]` });
-      } else {
-        seenKeywords.set(key, i);
-      }
-    });
+    for (const problem of keywordProblems(cfg.quests)) {
+      ctx.addIssue({ code: 'custom', path: ['quests', problem.index, 'keyword'], message: problem.message });
+    }
     const seenChannels = new Map<string, number>();
     cfg.channels.forEach((channel, i) => {
       const first = seenChannels.get(channel.id);

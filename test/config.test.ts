@@ -110,9 +110,14 @@ describe('config', () => {
     ['an invalid ID regex', MINIMAL.replace('id_description:', "id_pattern: '(['\n  id_description:"), /bind\.id_pattern/],
     ['a malformed channel ID', MINIMAL.replace(`"${CHANNEL_A}"`, '"general"'), /channels\[0\]\.id: must be a Discord ID/],
     [
-      'a duplicate keyword (case-insensitive)',
-      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n  - keyword: Daily Check-In\n    type: other'),
+      'a duplicate keyword (ignoring case and punctuation)',
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n  - keyword: "DAILY  check_in!"\n    type: other'),
       /quests\[1\]\.keyword: duplicates quests\[0\]/,
+    ],
+    [
+      'a keyword with no letters or digits',
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n  - keyword: "✅"\n    type: other'),
+      /quests\[1\]\.keyword: must contain at least one letter or digit/,
     ],
     ['a link channel without quest_type', MINIMAL.replace('mode: image', 'mode: link'), /channels\[0\]\.quest_type/],
     ['the reserved "unmatched" type', MINIMAL.replace('type: daily_check_in', 'type: unmatched'), /reserved/],
