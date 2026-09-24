@@ -196,6 +196,54 @@ describe('image channel', () => {
   });
 });
 
+describe('link channel', () => {
+  const inLinkChannel = (overrides: Partial<IncomingMessage> = {}) =>
+    message({ channelId: LINK_CHANNEL, channelName: 'content', attachments: [], ...overrides });
+
+  it('logs a message with a link as the channel quest type', async () => {
+    const { handler, rows } = setup();
+    const { msg, react, reply } = inLinkChannel({ content: 'my write-up: <https://example.com/post/42>' });
+    await handler(msg);
+    expect(rows()).toEqual([
+      expect.objectContaining({
+        quest_type: 'content_link',
+        fuzzy_match: false,
+        channel_name: 'content',
+        attachment_url: '',
+        link_url: 'https://example.com/post/42',
+        message_text: 'my write-up: <https://example.com/post/42>',
+        bound: true,
+        uid: '123456',
+      }),
+    ]);
+    expect(react).toHaveBeenCalledWith('✅');
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('ignores messages without a link: no row, no reaction, no reply', async () => {
+    const { handler, recorded } = setup();
+    const { msg, react, reply } = inLinkChannel({ content: 'great posts today everyone', attachments: [PNG] });
+    await handler(msg);
+    expect(recorded).toHaveLength(0);
+    expect(react).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('needs no keyword, and leaves attachment_url blank even with an image', async () => {
+    const { handler, rows } = setup();
+    await handler(inLinkChannel({ content: 'https://example.com/v/abc', attachments: [PNG] }).msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'content_link', attachment_url: '', link_url: 'https://example.com/v/abc' });
+  });
+
+  it('reminds an unbound member to /bind, and still logs', async () => {
+    const { handler, rows } = setup();
+    const { msg, reply } = inLinkChannel({ authorId: UNBOUND_USER, content: 'https://example.com/x' });
+    await handler(msg);
+    expect(rows()[0]).toMatchObject({ bound: false, uid: '' });
+    expect(reply).toHaveBeenCalledWith(`<@${UNBOUND_USER}> ${config.replies.unbound}`);
+  });
+});
+
 describe('what the bot ignores', () => {
   it.each([
     ['bots, webhooks and system messages (including its own)', { automated: true }],

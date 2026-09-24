@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { QuestMatcher } from '../src/matcher.js';
-import { buildSubmissionRow, classifyImageMessage, extractFirstLink, isImageAttachment } from '../src/submissions.js';
+import {
+  buildSubmissionRow,
+  classifyImageMessage,
+  classifyLinkMessage,
+  extractFirstLink,
+  isImageAttachment,
+} from '../src/submissions.js';
 
 const matcher = new QuestMatcher(
   [
@@ -26,6 +32,31 @@ describe('classifyImageMessage', () => {
     ['unbound + no image', 'share post', false, false, { action: 'warn', reaction: 'attention', warnings: ['noImage', 'unbound'] }],
   ])('%s', (_label, text, hasImage, bound, expected) => {
     expect(run(text, hasImage, bound)).toEqual(expected);
+  });
+});
+
+describe('classifyLinkMessage', () => {
+  it('logs any message with an http(s) link as the given type', () => {
+    expect(classifyLinkMessage({ text: 'look https://example.com/a', bound: true }, 'content_link')).toEqual({
+      action: 'log',
+      questType: 'content_link',
+      fuzzy: false,
+      reaction: 'success',
+      warnings: [],
+    });
+  });
+
+  it('adds the /bind reminder for unbound members', () => {
+    expect(classifyLinkMessage({ text: 'https://example.com/a', bound: false }, 'content_link')).toMatchObject({
+      action: 'log',
+      warnings: ['unbound'],
+    });
+  });
+
+  it('ignores messages without a link', () => {
+    expect(classifyLinkMessage({ text: 'nice work, example.com is great', bound: true }, 'content_link')).toEqual({
+      action: 'ignore',
+    });
   });
 });
 

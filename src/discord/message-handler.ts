@@ -9,6 +9,7 @@ import {
   type WarningKey,
   buildSubmissionRow,
   classifyImageMessage,
+  classifyLinkMessage,
   isImageAttachment,
 } from '../submissions.js';
 import type { SheetWriter } from '../writer.js';
@@ -104,11 +105,14 @@ export function createMessageHandler(deps: HandlerDeps) {
     if (!channel) return;
 
     const bind = deps.binds.lookup(message.authorId);
-    const image = message.attachments.find((a) => isImageAttachment(a, config.imageExtensions));
+    const bound = bind !== undefined;
+    // Link channels record the link only; attachment_url stays blank for them.
+    const image =
+      channel.mode === 'image' ? message.attachments.find((a) => isImageAttachment(a, config.imageExtensions)) : undefined;
     const outcome: Outcome =
       channel.mode === 'image'
-        ? classifyImageMessage({ text: message.content, hasImage: image !== undefined, bound: bind !== undefined }, deps.matcher)
-        : { action: 'ignore' };
+        ? classifyImageMessage({ text: message.content, hasImage: image !== undefined, bound }, deps.matcher)
+        : classifyLinkMessage({ text: message.content, bound }, channel.questType);
     if (outcome.action === 'ignore') return;
 
     if (outcome.action === 'log') {

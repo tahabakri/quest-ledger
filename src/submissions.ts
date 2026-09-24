@@ -40,6 +40,16 @@ export function classifyImageMessage(
   return { action: 'log', questType: match.type, fuzzy: match.kind === 'fuzzy', reaction: 'success', warnings: unbound };
 }
 
+/**
+ * Link channels: the channel itself names the quest. Any message with an
+ * http(s) link is logged as `questType`; anything else is conversation and is
+ * ignored without a reaction.
+ */
+export function classifyLinkMessage(input: { text: string; bound: boolean }, questType: string): Outcome {
+  if (extractFirstLink(input.text) === undefined) return { action: 'ignore' };
+  return { action: 'log', questType, fuzzy: false, reaction: 'success', warnings: input.bound ? [] : ['unbound'] };
+}
+
 export interface AttachmentInfo {
   name: string;
   url: string;
