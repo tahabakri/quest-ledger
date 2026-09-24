@@ -16,6 +16,9 @@ interface CompiledQuest {
 // Scores are ratios of small integers; compare with a tolerance so 0.8 >= 0.8 holds.
 const EPSILON = 1e-9;
 
+/** Typo matching looks at the first this-many words of a caption; exact matching sees all of it. */
+const MAX_FUZZY_WORDS = 100;
+
 /**
  * Canonical form used for all matching: Unicode-normalised, lower-case, with every
  * run of punctuation, emoji and whitespace collapsed to one space. So
@@ -60,9 +63,12 @@ export function keywordProblems(quests: readonly Quest[]): { index: number; mess
  *    to the longer keyword.
  *
  * Specificity guard: when the exact hit is a keyword contained in a longer
- * keyword (e.g. "check-in" inside "daily check-in") and the caption is a close
- * typo of that longer keyword, the longer one wins, flagged as fuzzy. Otherwise
- * a typo would silently downgrade the submission to the less specific quest.
+ * keyword (e.g. "check-in" inside "daily check-in") and the caption holds the
+ * exact hit plus more words that make a close typo of the longer keyword
+ * ("daly check-in"), the longer one wins, flagged as fuzzy. Otherwise a typo
+ * would silently downgrade the submission to the less specific quest. The exact
+ * hit on its own is never evidence for a longer keyword: "day 1" stays day 1
+ * even though "day 10" is one edit away.
  */
 export class QuestMatcher {
   private readonly quests: CompiledQuest[];
@@ -94,14 +100,15 @@ export class QuestMatcher {
   match(caption: string): QuestMatch {
     const text = normalizeText(caption);
     if (text === '') return { kind: 'none' };
-    const words = text.split(' ');
+    // Captions are short; bounding the typo search keeps a 4000-character message cheap.
+    const words = text.split(' ').slice(0, MAX_FUZZY_WORDS);
 
     const exact = this.quests.find((quest) => text.includes(quest.normalized));
     if (exact) {
       const moreSpecific = this.quests.filter(
         (quest) => quest.chars.length > exact.chars.length && quest.normalized.includes(exact.normalized),
       );
-      const typo = this.bestFuzzy(words, moreSpecific);
+      const typo = this.bestFuzzy(words, moreSpecific, exact.normalized);
       if (typo) return typo;
       return { kind: 'exact', type: exact.type, keyword: exact.keyword };
     }
@@ -109,7 +116,8 @@ export class QuestMatcher {
     return this.bestFuzzy(words, this.quests) ?? { kind: 'none' };
   }
 
-  private bestFuzzy(words: string[], candidates: CompiledQuest[]): QuestMatch | undefined {
+  /** With `extending`, only windows holding that exact text plus something more are considered. */
+  private bestFuzzy(words: string[], candidates: CompiledQuest[], extending?: string): QuestMatch | undefined {
     let best: { quest: CompiledQuest; score: number; window: string } | undefined;
     const maxGap = 1 - this.threshold + EPSILON;
 
@@ -120,6 +128,7 @@ export class QuestMatcher {
       for (let size = minSize; size <= maxSize; size++) {
         for (let start = 0; start + size <= words.length; start++) {
           const window = words.slice(start, start + size).join(' ');
+          if (extending !== undefined && (window === extending || !window.includes(extending))) continue;
           const chars = Array.from(window);
           const longest = Math.max(chars.length, quest.chars.length);
           // The length difference alone bounds the edit distance from below.

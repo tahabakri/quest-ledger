@@ -52,6 +52,29 @@ describe('QuestMatcher: specificity', () => {
     }
   });
 
+  it('never lets the guard turn an exact hit into a longer keyword it merely resembles', () => {
+    // "day 1" is one edit from "day 10": that is not evidence for day 10.
+    const days = new QuestMatcher(
+      Array.from({ length: 14 }, (_, i) => ({ keyword: `Day ${i + 1}`, type: `day_${i + 1}` })),
+      0.8,
+    );
+    expect(days.match('Day 1 done ✅')).toMatchObject({ kind: 'exact', type: 'day_1' });
+    expect(days.match('day 1')).toMatchObject({ kind: 'exact', type: 'day_1' });
+    expect(days.match('Day 12 ✅')).toMatchObject({ kind: 'exact', type: 'day_12' });
+    // Another keyword in the caption ("day 2", one edit from "day 12") is not evidence either.
+    expect(days.match('day 1 and day 2')).toMatchObject({ kind: 'exact', type: 'day_1' });
+
+    const plural = new QuestMatcher(
+      [
+        { keyword: 'check-in', type: 'check_in' },
+        { keyword: 'check-ins', type: 'check_ins' },
+      ],
+      0.8,
+    );
+    expect(plural.match('check-in ✅')).toMatchObject({ kind: 'exact', type: 'check_in' });
+    expect(plural.match('3 check-ins')).toMatchObject({ kind: 'exact', type: 'check_ins' });
+  });
+
   it('lets a close typo of a longer keyword beat the shorter keyword it contains', () => {
     expect(matcher.match('daly check-in')).toMatchObject({ kind: 'fuzzy', type: 'daily_check_in' });
     expect(matcher.match('evnt check-in')).toMatchObject({ kind: 'fuzzy', type: 'event_check_in' });
