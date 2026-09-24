@@ -3,12 +3,21 @@ import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { BindStore } from './binds.js';
 import { ConfigError, loadConfig } from './config.js';
 import { bindCommandData, createBindHandler, ephemeral } from './discord/bind-command.js';
+import { WarningReaper, createMessageHandler, fromDiscordMessage } from './discord/message-handler.js';
 import { loadDotEnv, readDiscordEnv, readRuntimeEnv, readSheetsEnv } from './env.js';
 import { LockError, acquireDataLock } from './lock.js';
 import { createLogger, describeError } from './logger.js';
+import { QuestMatcher } from './matcher.js';
 import { HeaderMismatchError, createGoogleSheetsGateway } from './sheets/gateway.js';
 import { WAL_FILENAME, WriteAheadLog } from './wal.js';
 import { SheetWriter } from './writer.js';
+
+const FATAL_CLOSE_CODES: Record<number, string> = {
+  4004: 'Discord rejected DISCORD_BOT_TOKEN. Reset it in the Developer Portal (Bot tab) and update the variable.',
+  4014:
+    'Discord refused the Message Content intent. Enable it: Developer Portal > your app > Bot > ' +
+    'Privileged Gateway Intents > Message Content Intent.',
+};
 
 async function main(): Promise<void> {
   loadDotEnv();
@@ -55,11 +64,22 @@ async function main(): Promise<void> {
   }
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    // Message Content is a privileged intent: enable it in the Developer Portal.
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
     // Bot messages never ping @everyone, roles or users unless a reply opts in.
     allowedMentions: { parse: [] },
   });
   const handleBind = createBindHandler({ config: config.bind, store: binds, writer, log: log.child('bind') });
+  const reaper = new WarningReaper(config.warningDeleteAfterSeconds * 1000, log);
+  const handleMessage = createMessageHandler({
+    config,
+    guildId: discordEnv.guildId,
+    matcher: new QuestMatcher(config.quests, config.fuzzyThreshold),
+    binds,
+    writer,
+    reaper,
+    log: log.child('submissions'),
+  });
 
   client.once(Events.ClientReady, (ready) => {
     log.info('connected to Discord', { as: ready.user.tag });
@@ -83,24 +103,39 @@ async function main(): Promise<void> {
     });
   });
 
-  client.on(Events.Error, (err) => log.error('Discord client error', { err }));
-  client.on(Events.ShardDisconnect, (event) => log.warn('disconnected from Discord; reconnecting', { code: event.code }));
-  client.on(Events.ShardResume, () => log.info('reconnected to Discord'));
-  process.on('unhandledRejection', (err) => log.error('unhandled promise rejection', { err }));
+  client.on(Events.MessageCreate, (message) => {
+    handleMessage(fromDiscordMessage(message)).catch((err: unknown) =>
+      log.error('message handler failed', { message: message.id, err }),
+    );
+  });
 
-  const shutdown = (signal: string) => {
-    log.info('shutting down', { signal, pending: writer.pendingCount });
-    void client
-      .destroy()
+  let stopping = false;
+  const shutdown = (reason: string, exitCode: number) => {
+    if (stopping) return;
+    stopping = true;
+    log.info('shutting down', { reason, pending: writer.pendingCount });
+    void reaper
+      .removeAllNow()
+      .then(() => client.destroy())
       .catch(() => undefined)
       .then(() => writer.stop())
       .finally(() => {
         wal.close();
-        process.exit(0);
+        process.exit(exitCode);
       });
   };
-  process.once('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT', 0));
+  process.once('SIGTERM', () => shutdown('SIGTERM', 0));
+
+  client.on(Events.Error, (err) => log.error('Discord client error', { err }));
+  client.on(Events.ShardResume, () => log.info('reconnected to Discord'));
+  // discord.js reconnects on its own; this fires only when it has given up.
+  // Exit so the host restarts the bot instead of leaving it running deaf.
+  client.on(Events.ShardDisconnect, (event) => {
+    log.error(FATAL_CLOSE_CODES[event.code] ?? 'disconnected from Discord and cannot reconnect', { code: event.code });
+    shutdown(`gateway closed (${event.code})`, 1);
+  });
+  process.on('unhandledRejection', (err) => log.error('unhandled promise rejection', { err }));
 
   try {
     await client.login(discordEnv.token);
