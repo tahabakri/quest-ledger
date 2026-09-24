@@ -85,6 +85,15 @@ describe('extractFirstLink', () => {
     ['two: http://first.example.com and https://second.example.com', 'http://first.example.com'],
     ['HTTPS://EXAMPLE.COM/UP', 'HTTPS://EXAMPLE.COM/UP'],
     ['||https://example.com/spoiler||', 'https://example.com/spoiler'],
+    // Masked links record where they point, not what they show.
+    ['[https://example.com/p](https://example.com/p)', 'https://example.com/p'],
+    ['[https://example.com/a](<https://example.com/a>)', 'https://example.com/a'],
+    ['[https://shown.example.com](https://real.example.com/t)', 'https://real.example.com/t'],
+    ['see [this](https://en.example.org/wiki/Thing_(topic)).', 'https://en.example.org/wiki/Thing_(topic)'],
+    // A trailing underscore is part of the URL unless the link is wrapped in underscores.
+    ['https://social.example.com/some_user_', 'https://social.example.com/some_user_'],
+    ['__https://example.com/underlined__', 'https://example.com/underlined'],
+    ['_https://example.com/italic_', 'https://example.com/italic'],
   ])('%j -> %s', (text, expected) => {
     expect(extractFirstLink(text)).toBe(expected);
   });

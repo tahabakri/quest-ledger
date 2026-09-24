@@ -67,6 +67,12 @@ export function isImageAttachment(attachment: AttachmentInfo, extensions: readon
 }
 
 const LINK = /https?:\/\/[^\s<>]+/gi;
+// [label](url) and [label](<url>) point at `url`, whatever the label shows.
+const MASKED_LINK = /\[[^\]\n]*\]\(\s*<?(https?:\/\/[^\s<>]+)>?\s*\)/gi;
+// Markdown that can wrap a link (**bold**, __underline__, ||spoiler||, `code`):
+// stripped from the end only when the same character opens the link, since
+// URLs can legitimately end in "_" (e.g. some profile handles).
+const WRAPPERS = new Set(['*', '_', '~', '|', '`']);
 const CLOSERS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
 
 /**
@@ -74,13 +80,20 @@ const CLOSERS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
  * ("<https://...>", "**https://...**", "[label](https://...)", "...https://x.")
  */
 export function extractFirstLink(text: string): string | undefined {
-  for (const [raw] of text.matchAll(LINK)) {
-    let url = raw;
+  const plain = text.replace(MASKED_LINK, ' $1 ');
+  for (const match of plain.matchAll(LINK)) {
+    const opener = plain[match.index - 1];
+    let url = match[0];
+    const masked = url.indexOf('](');
+    if (masked > 0) url = url.slice(0, masked); // a malformed masked link
     for (;;) {
-      let next = url.replace(/[.,;:!?'"*_~|`]+$/, '');
+      let next = url.replace(/[.,;:!?'"]+$/, '');
       const last = next.at(-1);
-      const opener = last === undefined ? undefined : CLOSERS[last];
-      if (opener !== undefined && count(next, last!) > count(next, opener)) next = next.slice(0, -1);
+      if (last !== undefined && last === opener && WRAPPERS.has(last)) {
+        next = next.slice(0, -1);
+      } else if (last !== undefined && CLOSERS[last] !== undefined && count(next, last) > count(next, CLOSERS[last])) {
+        next = next.slice(0, -1);
+      }
       if (next === url) break;
       url = next;
     }
