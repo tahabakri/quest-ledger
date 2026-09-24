@@ -1,0 +1,72 @@
+# quest-ledger configuration
+#
+# Copy to config.yml (gitignored) and edit, or put the whole file in the
+# CONFIG_YAML environment variable on hosts without file mounts.
+# Any string value may reference an environment variable as "${NAME}".
+
+# Quests recognised in `image` channels. A caption matches a keyword when the
+# keyword appears in it, ignoring case, punctuation, emoji and extra spaces.
+# Longer keywords are checked first. Several keywords may share one type.
+quests:
+  - keyword: daily check-in
+    type: daily_check_in
+  - keyword: share post
+    type: share_post
+  - keyword: event attendance
+    type: event_attendance
+  - keyword: invite
+    type: invite
+
+# Typo tolerance (0-1). When no keyword appears exactly, a run of caption words
+# at least this similar to a keyword (Levenshtein ratio) still counts, and the
+# row is flagged fuzzy_match = TRUE for review. 1 disables fuzzy matching.
+fuzzy_threshold: 0.8
+
+# The slash command members use to link an external account ID to Discord.
+bind:
+  command: bind # -> /bind
+  command_description: Link your account ID to your Discord account
+  id_label: uid # -> /bind uid:<value>
+  id_description: Your account ID (6-15 digits)
+  id_pattern: '^\d{6,15}$'
+  replies: # always sent ephemerally (only the member sees them)
+    success: Your account ID has been linked. You're all set.
+    invalid: That doesn't look like a valid account ID. It should be 6-15 digits, numbers only.
+    error: Something went wrong saving your ID. Please try again in a minute.
+
+# Channels the bot watches. Messages anywhere else are ignored.
+#   image: screenshot + caption; the caption is matched against `quests`
+#   link:  any message containing an http(s) link is logged as `quest_type`
+# IDs can be written inline ("123456789012345678") or pulled from the environment.
+channels:
+  - id: '${SUBMISSIONS_CHANNEL_ID}'
+    mode: image
+  - id: '${LINKS_CHANNEL_ID}'
+    mode: link
+    quest_type: content_link
+
+# Warnings posted in the channel, mentioning the member. When several apply to
+# one message they are combined into a single reply.
+replies:
+  unmatched: >-
+    We couldn't match this to a quest. We've saved it and will review it manually.
+    Next time, try including the quest name, e.g. "daily check-in".
+  no_image: Please attach a screenshot with your submission.
+  unbound: Please run /bind first so we can link your submission to your account.
+
+reactions:
+  success: '✅' # logged and matched
+  attention: '❓' # unmatched caption, or keyword without a screenshot
+
+# Warning replies are deleted after this many seconds. 0 keeps them.
+warning_delete_after_seconds: 60
+
+# Accepted screenshot types for `image` channels.
+image_extensions: [png, jpg, jpeg, gif, webp]
+
+sheets:
+  binds_tab: Binds
+  submissions_tab: Submissions
+  flush_interval_seconds: 5 # write queued rows at least this often...
+  flush_max_rows: 20 # ...or as soon as this many are waiting
+  binds_refresh_minutes: 10 # re-read the binds tab to pick up manual edits (0 = never)
