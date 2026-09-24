@@ -88,3 +88,14 @@ export function parseBindRow(cells: readonly string[]): BindRow | undefined {
 export function isoSeconds(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
+
+const ISO_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * True when a bind stamped `candidate` predates one stamped `current`, so it must
+ * not replace it (e.g. an old bind replayed from the log). Timestamps in this
+ * fixed format compare correctly as strings; anything else never counts as older.
+ */
+export function isOlderBind(candidate: string, current: string): boolean {
+  return ISO_SECONDS.test(candidate) && ISO_SECONDS.test(current) && candidate < current;
+}

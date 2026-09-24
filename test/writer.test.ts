@@ -267,6 +267,41 @@ describe('SheetWriter: binds', () => {
     expect(sheets.dataRows(TABS.binds)).toHaveLength(1);
   });
 
+  it('never lets a replayed older bind overwrite a newer one already in the sheet', async () => {
+    const { wal, sheets } = setup();
+    // Run 1: bind 111111 reaches the sheet but its ack is lost; a later re-bind to 222222 completes.
+    const lossy = new SheetWriter({
+      gateway: sheets,
+      wal: { append: (e: WalEntry) => wal.append(e), ack: () => { throw new Error('ack lost'); } },
+      tabs: TABS,
+      flushIntervalMs: 5_000,
+      flushMaxRows: 20,
+      log: silentLogger,
+    });
+    lossy.record(bind({ discord_user_id: USER_A, uid: '111111', last_updated_utc: '2026-01-01T00:00:00Z' }));
+    await lossy.flush();
+    const newer = bind({ discord_user_id: USER_A, uid: '222222', last_updated_utc: '2026-01-02T00:00:00Z' });
+    wal.append(newer);
+    wal.ack([newer.id]);
+    sheets.tabs.get(TABS.binds)![1]![3] = '222222';
+    sheets.tabs.get(TABS.binds)![1]![5] = '2026-01-02T00:00:00Z';
+
+    // Run 2: the stale 111111 bind is still un-acked and gets replayed.
+    const { writer, wal: reopened } = restart(wal, sheets);
+    expect(writer.pendingBinds().map((r) => r.uid)).toEqual(['111111']);
+    await writer.drainAll();
+    expect(sheets.dataRows(TABS.binds).map((r) => r[3])).toEqual(['222222']);
+    expect(new WriteAheadLog(reopened.path).read().pending).toHaveLength(0);
+  });
+
+  it('keeps the newest bind per user even if a batch holds them out of order', async () => {
+    const { sheets, writer } = setup();
+    writer.record(bind({ uid: '333333', last_updated_utc: '2026-01-03T00:00:00Z' }));
+    writer.record(bind({ uid: '111111', last_updated_utc: '2026-01-01T00:00:00Z' }));
+    await writer.flush();
+    expect(sheets.dataRows(TABS.binds).map((r) => r[3])).toEqual(['333333']);
+  });
+
   it('refreshBinds hands over sheet rows plus binds not yet written', async () => {
     const { writer } = setup();
     writer.record(bind({ discord_user_id: USER_A, uid: '111111' }));

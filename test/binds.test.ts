@@ -66,6 +66,14 @@ describe('BindStore', () => {
     expect(bindNow(store, B, '999999').duplicate_uid).toBe(false); // 999999 no longer held by A
   });
 
+  it('replace() ignores a pending bind that is older than the sheet row', () => {
+    const store = new BindStore();
+    const sheet = [store.prepare(A, 'member_a', '222222', T2)];
+    const stale = store.prepare(A, 'member_a', '111111', T1);
+    store.replace(sheet, [stale]);
+    expect(store.lookup(A)?.uid).toBe('222222');
+  });
+
   it('replace() keeps a user\'s first sheet row when there are several', () => {
     const store = new BindStore();
     const first = store.prepare(A, 'member_a', '111111', T1);

@@ -1,4 +1,4 @@
-import { type BindRow, isoSeconds } from './sheets/schema.js';
+import { type BindRow, isOlderBind, isoSeconds } from './sheets/schema.js';
 
 /**
  * In-memory view of the Binds tab, so submissions never read the sheet.
@@ -53,8 +53,10 @@ export class BindStore {
   }
 
   /**
-   * Replaces the cache with the sheet's rows, then re-applies `pending` binds.
-   * If a user somehow has several rows, the first is the one kept up to date.
+   * Replaces the cache with the sheet's rows, then re-applies `pending` binds
+   * that are newer than what the sheet holds (a stale bind replayed from the log
+   * must not win). If a user somehow has several rows, the first is the one kept
+   * up to date.
    */
   replace(sheetRows: readonly BindRow[], pending: readonly BindRow[] = []): void {
     this.byUser.clear();
@@ -62,7 +64,10 @@ export class BindStore {
     for (const row of sheetRows) {
       if (!this.byUser.has(row.discord_user_id)) this.apply(row);
     }
-    for (const row of pending) this.apply(row);
+    for (const row of pending) {
+      const current = this.byUser.get(row.discord_user_id);
+      if (!current || !isOlderBind(row.last_updated_utc, current.last_updated_utc)) this.apply(row);
+    }
   }
 
   /** Rebuilds from the write-ahead log's bind history (oldest first), for when the sheet is unreachable. */

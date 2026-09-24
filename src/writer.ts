@@ -8,6 +8,7 @@ import {
   SUBMISSION_HEADERS,
   type SubmissionRow,
   bindCells,
+  isOlderBind,
   parseBindRow,
   submissionCells,
 } from './sheets/schema.js';
@@ -273,40 +274,55 @@ export class SheetWriter {
     this.log.info('wrote submissions to the sheet', { rows: toWrite.length });
   }
 
-  /** Upsert keyed by Discord user ID: re-binding updates the user's existing row in place. */
+  /**
+   * Upsert keyed by Discord user ID: re-binding updates the user's existing row
+   * in place. Last write wins by last_updated_utc, so an older bind replayed
+   * from the log never overwrites a newer one.
+   */
   private async writeBinds(rows: BindRow[]): Promise<void> {
     const tab = this.options.tabs.binds;
     const width = BIND_HEADERS.length;
     const latest = new Map<string, BindRow>();
-    for (const row of rows) latest.set(row.discord_user_id, row);
+    for (const row of rows) {
+      const seen = latest.get(row.discord_user_id);
+      if (!seen || !isOlderBind(row.last_updated_utc, seen.last_updated_utc)) latest.set(row.discord_user_id, row);
+    }
 
     // Locate rows fresh on every write: people sort and edit review sheets.
-    const located = new Map<string, { rowNumber: number; firstBoundAt: string }>();
+    const located = new Map<string, { rowNumber: number; firstBoundAt: string; lastUpdated: string }>();
     (await this.gateway.readRows(tab, width)).forEach((cells, i) => {
       const userId = cells[1]?.trim();
       if (userId && !located.has(userId)) {
-        located.set(userId, { rowNumber: i + 2, firstBoundAt: cells[0]?.trim() ?? '' });
+        located.set(userId, {
+          rowNumber: i + 2,
+          firstBoundAt: cells[0]?.trim() ?? '',
+          lastUpdated: cells[5]?.trim() ?? '',
+        });
       }
     });
 
     const updates: { rowNumber: number; cells: ReturnType<typeof bindCells> }[] = [];
     const appends: ReturnType<typeof bindCells>[] = [];
+    let superseded = 0;
     for (const row of latest.values()) {
       const found = located.get(row.discord_user_id);
-      if (found) {
+      if (!found) {
+        appends.push(bindCells(row));
+      } else if (isOlderBind(row.last_updated_utc, found.lastUpdated)) {
+        superseded++;
+      } else {
         updates.push({
           rowNumber: found.rowNumber,
           cells: bindCells({ ...row, timestamp_utc: found.firstBoundAt || row.timestamp_utc }),
         });
-      } else {
-        appends.push(bindCells(row));
       }
     }
     if (updates.length > 0) await this.gateway.updateRows(tab, width, updates);
     if (appends.length > 0) await this.gateway.appendRows(tab, width, appends);
     this.stats.updated += updates.length;
     this.stats.appended += appends.length;
-    this.log.info('wrote binds to the sheet', { updated: updates.length, added: appends.length });
+    this.stats.skippedExisting += superseded;
+    this.log.info('wrote binds to the sheet', { updated: updates.length, added: appends.length, superseded });
   }
 
   /** Marks rows as safely in the sheet. */
@@ -315,7 +331,8 @@ export class SheetWriter {
     try {
       this.options.wal.ack(ids);
     } catch (err) {
-      // The rows are in the sheet; on the next start they are re-checked and skipped.
+      // The rows are in the sheet. On the next start they replay harmlessly: submissions
+      // are found by message_link and skipped, binds only apply if newer than the sheet's.
       this.log.error('could not record acknowledgement in the write-ahead log', { rows: ids.length, err });
     }
     const done = new Set(ids);
