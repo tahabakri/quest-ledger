@@ -9,6 +9,8 @@
 # Longer keywords are checked first. Several keywords may share one type.
 # Optional per quest: `strict: true` matches the keyword only as a whole word, with
 # no typo tolerance. Use it for short keywords ("join" would match inside "joint").
+# `review: true` marks a close variant of the official caption (say "sharing post" next to
+# "share post"): it logs under the same quest but with fuzzy_match = TRUE, for manual review.
 # `reply: ...` is posted (mentioning the member) when a submission is logged as that
 # quest, joined with any warning in one message and deleted after
 # warning_delete_after_seconds. Quests without a reply stay silent.

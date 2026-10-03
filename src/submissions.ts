@@ -37,7 +37,9 @@ export function classifyImageMessage(
   if (match.kind === 'none') {
     return { action: 'log', questType: UNMATCHED_QUEST_TYPE, fuzzy: false, reaction: 'attention', warnings: ['unmatched', ...unbound] };
   }
-  return { action: 'log', questType: match.type, fuzzy: match.kind === 'fuzzy', reaction: 'success', warnings: unbound };
+  // Typo matches and close variants are flagged (fuzzy_match = TRUE) for a manual look.
+  const flagged = match.kind === 'fuzzy' || match.review === true;
+  return { action: 'log', questType: match.type, fuzzy: flagged, reaction: 'success', warnings: unbound };
 }
 
 /**

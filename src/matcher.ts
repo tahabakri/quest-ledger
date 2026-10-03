@@ -1,7 +1,8 @@
 import type { Quest } from './config.js';
 
 export type QuestMatch =
-  | { kind: 'exact'; type: string; keyword: string }
+  /** `review` is set when the matched keyword is a close variant, not the official caption. */
+  | { kind: 'exact'; type: string; keyword: string; review?: true }
   | { kind: 'fuzzy'; type: string; keyword: string; score: number; window: string }
   | { kind: 'none' };
 
@@ -13,6 +14,8 @@ interface CompiledQuest {
   wordCount: number;
   /** Whole-word exact matches only; never considered for typo matching. */
   strict: boolean;
+  /** A close variant of the official caption; its exact matches are flagged for review. */
+  review: boolean;
 }
 
 // Scores are ratios of small integers; compare with a tolerance so 0.8 >= 0.8 holds.
@@ -65,7 +68,10 @@ export function keywordProblems(quests: readonly Quest[]): { index: number; mess
  * 1. Exact: the keyword appears in the caption. Longest keyword first, so a
  *    specific keyword always beats a shorter one it shares words with. A
  *    `strict` keyword only counts as a whole word ("join" is not found in
- *    "joint") and is skipped by the typo step below.
+ *    "joint") and is skipped by the typo step below. A `review` keyword (a close
+ *    variant such as an "-ing" form) matches the same way but is reported with
+ *    `review: true`, so the caller can flag the row, unless the quest's official
+ *    caption is also in the text.
  * 2. Fuzzy: otherwise, every run of caption words (keyword length -1/0/+1 words,
  *    to tolerate merged or split words) is scored against each keyword by
  *    Levenshtein ratio. The highest score at or above the threshold wins; ties go
@@ -104,6 +110,7 @@ export class QuestMatcher {
           chars: Array.from(normalized),
           wordCount: normalized.split(' ').length,
           strict: quest.strict === true,
+          review: quest.review === true,
         };
       })
       .sort((a, b) => b.chars.length - a.chars.length);
@@ -116,16 +123,21 @@ export class QuestMatcher {
     // Captions are short; bounding the typo search keeps a 4000-character message cheap.
     const words = text.split(' ').slice(0, MAX_FUZZY_WORDS);
 
-    const exact = this.quests.find((quest) =>
-      quest.strict ? hasWholeWords(text, quest.normalized) : text.includes(quest.normalized),
-    );
+    const found = (quest: CompiledQuest): boolean =>
+      quest.strict ? hasWholeWords(text, quest.normalized) : text.includes(quest.normalized);
+    const first = this.quests.find(found);
+    // A close variant is flagged for review, unless the official caption of the same
+    // quest is in the text too: then there is nothing to double-check.
+    const exact = first?.review
+      ? (this.quests.find((quest) => !quest.review && quest.type === first.type && found(quest)) ?? first)
+      : first;
     if (exact) {
       const moreSpecific = this.fuzzyQuests.filter(
         (quest) => quest.chars.length > exact.chars.length && quest.normalized.includes(exact.normalized),
       );
       const typo = this.bestFuzzy(words, moreSpecific, exact.normalized);
       if (typo) return typo;
-      return { kind: 'exact', type: exact.type, keyword: exact.keyword };
+      return { kind: 'exact', type: exact.type, keyword: exact.keyword, ...(exact.review ? { review: true as const } : {}) };
     }
 
     return this.bestFuzzy(words, this.fuzzyQuests) ?? { kind: 'none' };

@@ -228,6 +228,59 @@ describe('QuestMatcher: strict keywords', () => {
   });
 });
 
+describe('QuestMatcher: review keywords', () => {
+  const QUESTS_WITH_REVIEW: Quest[] = [
+    { keyword: 'share post', type: 'share_post' },
+    { keyword: 'sharing post', type: 'share_post', review: true },
+    { keyword: 'boost post', type: 'boost_post' },
+    { keyword: 'boosting post', type: 'boost_post', review: true },
+  ];
+  const reviewMatcher = new QuestMatcher(QUESTS_WITH_REVIEW, 0.8);
+
+  it('catches what typo matching cannot: an "-ing" form is only 0.75 similar', () => {
+    const withoutVariant = new QuestMatcher([{ keyword: 'share post', type: 'share_post' }], 0.8);
+    expect(withoutVariant.match('sharing post')).toEqual({ kind: 'none' });
+  });
+
+  it('logs the close variant under its quest and marks it for review', () => {
+    expect(reviewMatcher.match('Sharing Post ✅')).toEqual({
+      kind: 'exact',
+      type: 'share_post',
+      keyword: 'sharing post',
+      review: true,
+    });
+    expect(reviewMatcher.match('boosting post')).toEqual({
+      kind: 'exact',
+      type: 'boost_post',
+      keyword: 'boosting post',
+      review: true,
+    });
+  });
+
+  it('leaves the official caption unmarked', () => {
+    expect(reviewMatcher.match('share post')).toEqual({ kind: 'exact', type: 'share_post', keyword: 'share post' });
+  });
+
+  it('does not mark it when the official caption is in the text as well', () => {
+    expect(reviewMatcher.match('sharing post (share post)')).toEqual({
+      kind: 'exact',
+      type: 'share_post',
+      keyword: 'share post',
+    });
+  });
+
+  it('still catches typos of the variant, as fuzzy matches', () => {
+    expect(reviewMatcher.match('sharng post')).toMatchObject({ kind: 'fuzzy', type: 'share_post' });
+  });
+
+  it('does not depend on the order quests are configured in', () => {
+    const reversed = new QuestMatcher([...QUESTS_WITH_REVIEW].reverse(), 0.8);
+    for (const caption of ['sharing post', 'share post', 'sharing post (share post)', 'boosting post', 'sharng post']) {
+      expect(reversed.match(caption)).toEqual(reviewMatcher.match(caption));
+    }
+  });
+});
+
 describe('QuestMatcher: construction', () => {
   it('rejects keywords that collide after normalisation', () => {
     expect(() => new QuestMatcher([{ keyword: 'Share Post', type: 'a' }, { keyword: 'share-post', type: 'b' }], 0.8)).toThrow(

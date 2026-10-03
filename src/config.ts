@@ -64,6 +64,7 @@ const QuestSchema = z.strictObject({
   keyword: z.string().trim().min(1),
   type: questType,
   strict: z.boolean().default(false),
+  review: z.boolean().default(false),
   reply: replyText.optional(),
 });
 
@@ -173,6 +174,12 @@ export interface Quest {
    * would otherwise match inside other words ("join" in "joint").
    */
   strict?: boolean;
+  /**
+   * A close variant rather than the official caption (a quest's name, an "-ing" form).
+   * Submissions that match it are logged under the quest with fuzzy_match = TRUE, so
+   * they stand out for manual review.
+   */
+  review?: boolean;
   /** Posted (mentioning the member) when a submission is logged as this quest. */
   reply?: string;
 }
@@ -316,7 +323,13 @@ function formatPath(path: PropertyKey[]): string {
 
 function toAppConfig(raw: RawConfig): AppConfig {
   return {
-    quests: raw.quests.map((q) => ({ keyword: q.keyword, type: q.type, strict: q.strict, reply: q.reply })),
+    quests: raw.quests.map((q) => ({
+      keyword: q.keyword,
+      type: q.type,
+      strict: q.strict,
+      review: q.review,
+      reply: q.reply,
+    })),
     fuzzyThreshold: raw.fuzzy_threshold,
     bind: {
       command: raw.bind.command,

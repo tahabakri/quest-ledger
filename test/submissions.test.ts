@@ -35,6 +35,31 @@ describe('classifyImageMessage', () => {
   });
 });
 
+describe('classifyImageMessage: close variants', () => {
+  const variantMatcher = new QuestMatcher(
+    [
+      { keyword: 'share post', type: 'share_post' },
+      { keyword: 'sharing post', type: 'share_post', review: true },
+    ],
+    0.8,
+  );
+  const run = (text: string) => classifyImageMessage({ text, hasImage: true, bound: true }, variantMatcher);
+
+  it('flags a close variant for manual review, like a typo, and still counts it as a success', () => {
+    expect(run('sharing post')).toEqual({
+      action: 'log',
+      questType: 'share_post',
+      fuzzy: true,
+      reaction: 'success',
+      warnings: [],
+    });
+  });
+
+  it('does not flag the official caption', () => {
+    expect(run('share post')).toMatchObject({ questType: 'share_post', fuzzy: false });
+  });
+});
+
 describe('classifyLinkMessage', () => {
   it('logs any message with an http(s) link as the given type', () => {
     expect(classifyLinkMessage({ text: 'look https://example.com/a', bound: true }, 'content_link')).toEqual({

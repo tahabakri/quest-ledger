@@ -255,6 +255,9 @@ quests:
   - keyword: daily check-in
     type: daily_check_in
     reply: Check-in logged. See you tomorrow!
+  - keyword: checking in daily
+    type: daily_check_in
+    review: true
   - keyword: join
     type: event_join
     strict: true
@@ -295,6 +298,14 @@ describe('quest replies', () => {
     expect(rows()[0]).toMatchObject({ quest_type: 'daily_check_in' });
     expect(react).toHaveBeenCalledWith('✅');
     expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Check-in logged. See you tomorrow!`);
+  });
+
+  it('logs a close variant under the quest, flagged for review, and still replies', async () => {
+    const { handler, msg, react, reply, rows } = run({ content: 'Checking in daily' });
+    await handler(msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'daily_check_in', fuzzy_match: true, message_text: 'Checking in daily' });
+    expect(react).toHaveBeenCalledWith('✅');
     expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Check-in logged. See you tomorrow!`);
   });
 

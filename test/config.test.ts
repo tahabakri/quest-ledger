@@ -82,6 +82,12 @@ describe('config', () => {
     expect(strict.quests[0]?.strict).toBe(true);
   });
 
+  it('reads the per-quest review flag, off by default', () => {
+    expect(parse(MINIMAL).quests[0]?.review).toBe(false);
+    const flagged = parse(MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    review: true'));
+    expect(flagged.quests[0]?.review).toBe(true);
+  });
+
   it('reads quest replies and link channel replies, absent by default', () => {
     expect(parse(MINIMAL).quests[0]?.reply).toBeUndefined();
     const withReply = parse(MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    reply: Nice!'));
@@ -155,6 +161,11 @@ describe('config', () => {
       'a strict flag that is not true or false',
       MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    strict: maybe'),
       /quests\[0\]\.strict/,
+    ],
+    [
+      'a review flag that is not true or false',
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    review: sometimes'),
+      /quests\[0\]\.review/,
     ],
     ['invalid YAML', 'quests: [unclosed', /invalid YAML/],
     [

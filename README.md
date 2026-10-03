@@ -57,6 +57,8 @@ Captions and keywords are compared in a canonical form: Unicode-normalised, lowe
 2. **Typo-tolerant.** If nothing matches exactly, each run of caption words is scored against each keyword by [Levenshtein ratio](https://en.wikipedia.org/wiki/Levenshtein_distance): `1 - edits / length of the longer string`. Windows one word shorter or longer than the keyword are scored too, so merged or split words still count. The best score at or above `fuzzy_threshold` (default 0.8) wins; ties go to the longer keyword. Those rows get `fuzzy_match = TRUE`. For example, `done - event attendence ✅` scores 0.94 against `event attendance`.
 3. **Specificity guard.** If the exact hit is a keyword contained in a longer keyword (`check-in` inside `daily check-in`), and the caption is a close typo of the longer one (`daly check-in`), the longer one wins, flagged fuzzy. A typo therefore never silently downgrades a submission to a less specific quest.
 
+Typo matching has a limit: `sharing post` is only 0.75 similar to `share post`, below the 0.8 default. List such variants as extra keywords with `review: true` and they are logged under the right quest and flagged, so a person can confirm them from the sheet.
+
 A keyword marked `strict` skips the typo step and only counts as a whole word. That keeps a short keyword like `join` from matching `joint`, `joined` or `disjoin`. Pair it with a longer, non-strict alias (`join event`) so typos of the full name still match.
 
 Anything that clears none of these is logged as `unmatched` with its full text. Nothing is lost to a typo, and reviewers decide.
@@ -102,7 +104,7 @@ You can add your own review columns to the right of these.
 | D | `uid` | 123456789 | From the bind cache; blank if unbound |
 | E | `bound` | TRUE | FALSE if the member hadn't run `/bind` |
 | F | `quest_type` | daily_check_in | A quest type, a link channel's type, or `unmatched` |
-| G | `fuzzy_match` | FALSE | TRUE for typo matches |
+| G | `fuzzy_match` | FALSE | TRUE for typo matches and for `review` keywords: filter on it for a manual check |
 | H | `channel_name` | submissions | |
 | I | `message_text` | Daily check-in done ✅ | Full raw text |
 | J | `attachment_url` | https://cdn.discordapp.com/... | First image; blank in link channels |
@@ -163,7 +165,7 @@ Everything deployment-specific lives in `config.yml`, which is gitignored. [`con
 
 | Key | Default | Meaning |
 |---|---|---|
-| `quests` | required | List of `{ keyword, type, strict?, reply? }`. `reply` is posted, mentioning the member, when a submission is logged as that quest (typo matches included); it joins any warning in one message, and one quest type has one wording. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. `strict: true` matches the keyword only as a whole word, with no typo tolerance: use it for short keywords such as `join`, which would otherwise match inside `joint`. |
+| `quests` | required | List of `{ keyword, type, strict?, review?, reply? }`. `review: true` marks a keyword as a close variant rather than the official caption (a quest's name, an "-ing" form that typo matching is too far from): it logs under the quest like any match but sets `fuzzy_match = TRUE`, unless the official caption is in the text too. `reply` is posted, mentioning the member, when a submission is logged as that quest (typo matches included); it joins any warning in one message, and one quest type has one wording. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. `strict: true` matches the keyword only as a whole word, with no typo tolerance: use it for short keywords such as `join`, which would otherwise match inside `joint`. |
 | `fuzzy_threshold` | `0.8` | Minimum Levenshtein ratio for a typo match, `0 < t <= 1`. `1` disables typo matching. |
 | `bind.command` | `bind` | Slash command name. |
 | `bind.command_description` | required | Shown in Discord's command picker. |
