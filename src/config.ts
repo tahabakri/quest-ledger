@@ -63,6 +63,7 @@ const regexSource = z
 const QuestSchema = z.strictObject({
   keyword: z.string().trim().min(1),
   type: questType,
+  strict: z.boolean().default(false),
 });
 
 const ChannelSchema = z.discriminatedUnion('mode', [
@@ -146,6 +147,11 @@ type RawConfig = z.output<typeof RawConfigSchema>;
 export interface Quest {
   keyword: string;
   type: string;
+  /**
+   * Whole-word matches only, with no typo tolerance. For short keywords that
+   * would otherwise match inside other words ("join" in "joint").
+   */
+  strict?: boolean;
 }
 
 export type ChannelConfig = { id: string; mode: 'image' } | { id: string; mode: 'link'; questType: string };
@@ -285,7 +291,7 @@ function formatPath(path: PropertyKey[]): string {
 
 function toAppConfig(raw: RawConfig): AppConfig {
   return {
-    quests: raw.quests.map((q) => ({ keyword: q.keyword, type: q.type })),
+    quests: raw.quests.map((q) => ({ keyword: q.keyword, type: q.type, strict: q.strict })),
     fuzzyThreshold: raw.fuzzy_threshold,
     bind: {
       command: raw.bind.command,

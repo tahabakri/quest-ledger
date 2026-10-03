@@ -7,6 +7,8 @@
 # Quests recognised in `image` channels. A caption matches a keyword when the
 # keyword appears in it, ignoring case, punctuation, emoji and extra spaces.
 # Longer keywords are checked first. Several keywords may share one type.
+# Optional per quest: `strict: true` matches the keyword only as a whole word, with
+# no typo tolerance. Use it for short keywords ("join" would match inside "joint").
 quests:
   - keyword: daily check-in
     type: daily_check_in

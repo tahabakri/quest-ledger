@@ -172,6 +172,62 @@ describe('QuestMatcher: unmatched', () => {
   });
 });
 
+describe('QuestMatcher: strict keywords', () => {
+  const QUESTS_WITH_STRICT: Quest[] = [
+    { keyword: 'join', type: 'event_join', strict: true },
+    { keyword: 'join event', type: 'event_join' },
+    { keyword: 'tour', type: 'weekly_tour', strict: true },
+    { keyword: 'weekly tour', type: 'weekly_tour' },
+    { keyword: 'share post', type: 'share_post' },
+  ];
+  const strictMatcher = new QuestMatcher(QUESTS_WITH_STRICT, 0.8);
+
+  it.each([
+    ['join', 'event_join'],
+    ['JOIN ✅', 'event_join'],
+    ['Join!', 'event_join'],
+    ['done - join', 'event_join'],
+    ['how to join us', 'event_join'],
+    ['tour', 'weekly_tour'],
+    ['Tour: loved the second stop', 'weekly_tour'],
+    ['Join Event', 'event_join'],
+    ['Weekly Tour', 'weekly_tour'],
+  ])('%j is an exact %s', (caption, type) => {
+    expect(strictMatcher.match(caption)).toMatchObject({ kind: 'exact', type });
+  });
+
+  it.each(['joint', 'joined', 'joining', 'disjoin', 'tourist', 'detour', 'contour', 'tours'])(
+    '%j does not match a strict keyword hidden inside another word',
+    (caption) => {
+      expect(strictMatcher.match(caption)).toEqual({ kind: 'none' });
+    },
+  );
+
+  it('gives strict keywords no typo tolerance', () => {
+    expect(strictMatcher.match('jon')).toEqual({ kind: 'none' });
+    expect(strictMatcher.match('tor')).toEqual({ kind: 'none' });
+    // Without strict, the keyword is found inside longer words.
+    const loose = new QuestMatcher([{ keyword: 'join', type: 'event_join' }], 0.8);
+    expect(loose.match('joint')).toMatchObject({ kind: 'exact', type: 'event_join' });
+  });
+
+  it('still tolerates typos in the longer, non-strict aliases', () => {
+    expect(strictMatcher.match('weekly tou')).toMatchObject({ kind: 'fuzzy', type: 'weekly_tour' });
+    expect(strictMatcher.match('joim event')).toMatchObject({ kind: 'fuzzy', type: 'event_join' });
+  });
+
+  it('lets a longer keyword elsewhere in the caption win over a strict one', () => {
+    expect(strictMatcher.match('tour for the share post')).toMatchObject({ kind: 'exact', type: 'share_post' });
+  });
+
+  it('does not depend on the order quests are configured in', () => {
+    const reversed = new QuestMatcher([...QUESTS_WITH_STRICT].reverse(), 0.8);
+    for (const caption of ['join', 'tour', 'joint', 'detour', 'Weekly Tour', 'weekly tou', 'tour for the share post']) {
+      expect(reversed.match(caption)).toEqual(strictMatcher.match(caption));
+    }
+  });
+});
+
 describe('QuestMatcher: construction', () => {
   it('rejects keywords that collide after normalisation', () => {
     expect(() => new QuestMatcher([{ keyword: 'Share Post', type: 'a' }, { keyword: 'share-post', type: 'b' }], 0.8)).toThrow(

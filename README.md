@@ -57,6 +57,8 @@ Captions and keywords are compared in a canonical form: Unicode-normalised, lowe
 2. **Typo-tolerant.** If nothing matches exactly, each run of caption words is scored against each keyword by [Levenshtein ratio](https://en.wikipedia.org/wiki/Levenshtein_distance): `1 - edits / length of the longer string`. Windows one word shorter or longer than the keyword are scored too, so merged or split words still count. The best score at or above `fuzzy_threshold` (default 0.8) wins; ties go to the longer keyword. Those rows get `fuzzy_match = TRUE`. For example, `done - event attendence ✅` scores 0.94 against `event attendance`.
 3. **Specificity guard.** If the exact hit is a keyword contained in a longer keyword (`check-in` inside `daily check-in`), and the caption is a close typo of the longer one (`daly check-in`), the longer one wins, flagged fuzzy. A typo therefore never silently downgrades a submission to a less specific quest.
 
+A keyword marked `strict` skips the typo step and only counts as a whole word. That keeps a short keyword like `join` from matching `joint`, `joined` or `disjoin`. Pair it with a longer, non-strict alias (`join event`) so typos of the full name still match.
+
 Anything that clears none of these is logged as `unmatched` with its full text. Nothing is lost to a typo, and reviewers decide.
 
 ### Reliability
@@ -161,7 +163,7 @@ Everything deployment-specific lives in `config.yml`, which is gitignored. [`con
 
 | Key | Default | Meaning |
 |---|---|---|
-| `quests` | required | List of `{ keyword, type }`. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. |
+| `quests` | required | List of `{ keyword, type, strict? }`. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. `strict: true` matches the keyword only as a whole word, with no typo tolerance: use it for short keywords such as `join`, which would otherwise match inside `joint`. |
 | `fuzzy_threshold` | `0.8` | Minimum Levenshtein ratio for a typo match, `0 < t <= 1`. `1` disables typo matching. |
 | `bind.command` | `bind` | Slash command name. |
 | `bind.command_description` | required | Shown in Discord's command picker. |

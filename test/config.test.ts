@@ -76,6 +76,12 @@ describe('config', () => {
     expect(config.sheets.flushMaxRows).toBe(20);
   });
 
+  it('reads the per-quest strict flag, off by default', () => {
+    expect(parse(MINIMAL).quests[0]?.strict).toBe(false);
+    const strict = parse(MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    strict: true'));
+    expect(strict.quests[0]?.strict).toBe(true);
+  });
+
   it('keeps unquoted 19-digit channel IDs exact (no float rounding)', () => {
     const config = parse(MINIMAL.replace(`"${CHANNEL_A}"`, '1234567890123456789'));
     expect(config.channels[0]?.id).toBe('1234567890123456789');
@@ -122,6 +128,11 @@ describe('config', () => {
     ['a link channel without quest_type', MINIMAL.replace('mode: image', 'mode: link'), /channels\[0\]\.quest_type/],
     ['the reserved "unmatched" type', MINIMAL.replace('type: daily_check_in', 'type: unmatched'), /reserved/],
     ['an upper-case command name', MINIMAL.replace('id_label: uid', 'id_label: UID'), /bind\.id_label: must be lowercase/],
+    [
+      'a strict flag that is not true or false',
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    strict: maybe'),
+      /quests\[0\]\.strict/,
+    ],
     ['invalid YAML', 'quests: [unclosed', /invalid YAML/],
     [
       'warnings that combine past Discord\'s 2000-character limit',

@@ -11,6 +11,8 @@ interface CompiledQuest {
   normalized: string;
   chars: string[];
   wordCount: number;
+  /** Whole-word exact matches only; never considered for typo matching. */
+  strict: boolean;
 }
 
 // Scores are ratios of small integers; compare with a tolerance so 0.8 >= 0.8 holds.
@@ -30,6 +32,11 @@ export function normalizeText(text: string): string {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
     .trim();
+}
+
+/** `text` and `phrase` are both normalised (single spaces, no punctuation), so padding with spaces marks word edges. */
+function hasWholeWords(text: string, phrase: string): boolean {
+  return ` ${text} `.includes(` ${phrase} `);
 }
 
 /** Returns one problem per offending quest, for config validation. */
@@ -56,7 +63,9 @@ export function keywordProblems(quests: readonly Quest[]): { index: number; mess
  * Maps a free-text caption to a quest type.
  *
  * 1. Exact: the keyword appears in the caption. Longest keyword first, so a
- *    specific keyword always beats a shorter one it shares words with.
+ *    specific keyword always beats a shorter one it shares words with. A
+ *    `strict` keyword only counts as a whole word ("join" is not found in
+ *    "joint") and is skipped by the typo step below.
  * 2. Fuzzy: otherwise, every run of caption words (keyword length -1/0/+1 words,
  *    to tolerate merged or split words) is scored against each keyword by
  *    Levenshtein ratio. The highest score at or above the threshold wins; ties go
@@ -72,6 +81,8 @@ export function keywordProblems(quests: readonly Quest[]): { index: number; mess
  */
 export class QuestMatcher {
   private readonly quests: CompiledQuest[];
+  /** The quests typo matching may choose from (everything except `strict` ones). */
+  private readonly fuzzyQuests: CompiledQuest[];
 
   constructor(
     quests: readonly Quest[],
@@ -92,9 +103,11 @@ export class QuestMatcher {
           normalized,
           chars: Array.from(normalized),
           wordCount: normalized.split(' ').length,
+          strict: quest.strict === true,
         };
       })
       .sort((a, b) => b.chars.length - a.chars.length);
+    this.fuzzyQuests = this.quests.filter((quest) => !quest.strict);
   }
 
   match(caption: string): QuestMatch {
@@ -103,9 +116,11 @@ export class QuestMatcher {
     // Captions are short; bounding the typo search keeps a 4000-character message cheap.
     const words = text.split(' ').slice(0, MAX_FUZZY_WORDS);
 
-    const exact = this.quests.find((quest) => text.includes(quest.normalized));
+    const exact = this.quests.find((quest) =>
+      quest.strict ? hasWholeWords(text, quest.normalized) : text.includes(quest.normalized),
+    );
     if (exact) {
-      const moreSpecific = this.quests.filter(
+      const moreSpecific = this.fuzzyQuests.filter(
         (quest) => quest.chars.length > exact.chars.length && quest.normalized.includes(exact.normalized),
       );
       const typo = this.bestFuzzy(words, moreSpecific, exact.normalized);
@@ -113,7 +128,7 @@ export class QuestMatcher {
       return { kind: 'exact', type: exact.type, keyword: exact.keyword };
     }
 
-    return this.bestFuzzy(words, this.quests) ?? { kind: 'none' };
+    return this.bestFuzzy(words, this.fuzzyQuests) ?? { kind: 'none' };
   }
 
   /** With `extending`, only windows holding that exact text plus something more are considered. */
