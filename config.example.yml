@@ -9,15 +9,20 @@
 # Longer keywords are checked first. Several keywords may share one type.
 # Optional per quest: `strict: true` matches the keyword only as a whole word, with
 # no typo tolerance. Use it for short keywords ("join" would match inside "joint").
+# `reply: ...` is posted (mentioning the member) when a submission is logged as that
+# quest, joined with any warning in one message and deleted after
+# warning_delete_after_seconds. Quests without a reply stay silent.
 quests:
   - keyword: daily check-in
     type: daily_check_in
   - keyword: share post
     type: share_post
+    reply: Post logged. Thanks for sharing!
   - keyword: event attendance
     type: event_attendance
   - keyword: invite
     type: invite
+    reply: Invite logged. Thanks for spreading the word!
 
 # Typo tolerance (0-1). When no keyword appears exactly, a run of caption words
 # at least this similar to a keyword (Levenshtein ratio) still counts, and the

@@ -64,11 +64,12 @@ const QuestSchema = z.strictObject({
   keyword: z.string().trim().min(1),
   type: questType,
   strict: z.boolean().default(false),
+  reply: replyText.optional(),
 });
 
 const ChannelSchema = z.discriminatedUnion('mode', [
   z.strictObject({ id: snowflake, mode: z.literal('image') }),
-  z.strictObject({ id: snowflake, mode: z.literal('link'), quest_type: questType }),
+  z.strictObject({ id: snowflake, mode: z.literal('link'), quest_type: questType, reply: replyText.optional() }),
 ]);
 
 const RawConfigSchema = z
@@ -130,14 +131,34 @@ const RawConfigSchema = z
     if (cfg.sheets.binds_tab === cfg.sheets.submissions_tab) {
       ctx.addIssue({ code: 'custom', path: ['sheets', 'submissions_tab'], message: 'must differ from binds_tab' });
     }
-    // Worst case is one combined reply: "<@member> " + (unmatched or no_image) + "\n" + unbound.
+    // A quest type has one reply wording. Several keywords may share a type (aliases), and
+    // then at most one of them carries the reply or they must agree.
+    const replyByType = new Map<string, string>();
+    const checkReply = (type: string, reply: string | undefined, path: (string | number)[]): void => {
+      if (reply === undefined) return;
+      const existing = replyByType.get(type);
+      if (existing !== undefined && existing !== reply) {
+        ctx.addIssue({ code: 'custom', path, message: `quest type "${type}" already has a different reply` });
+      } else {
+        replyByType.set(type, reply);
+      }
+    };
+    cfg.quests.forEach((quest, i) => checkReply(quest.type, quest.reply, ['quests', i, 'reply']));
+    cfg.channels.forEach((channel, i) => {
+      if (channel.mode === 'link') checkReply(channel.quest_type, channel.reply, ['channels', i, 'reply']);
+    });
+
+    // Worst case is one combined reply: "<@member> " + (a warning or a quest reply) + "\n" + unbound.
     const longest =
-      MENTION_ALLOWANCE + Math.max(cfg.replies.unmatched.length, cfg.replies.no_image.length) + 1 + cfg.replies.unbound.length;
+      MENTION_ALLOWANCE +
+      Math.max(cfg.replies.unmatched.length, cfg.replies.no_image.length, ...[...replyByType.values()].map((r) => r.length)) +
+      1 +
+      cfg.replies.unbound.length;
     if (longest > DISCORD_MESSAGE_LIMIT) {
       ctx.addIssue({
         code: 'custom',
         path: ['replies'],
-        message: `combined warnings can reach ${longest} characters; Discord allows ${DISCORD_MESSAGE_LIMIT}. Shorten them.`,
+        message: `combined replies can reach ${longest} characters; Discord allows ${DISCORD_MESSAGE_LIMIT}. Shorten them.`,
       });
     }
   });
@@ -152,9 +173,13 @@ export interface Quest {
    * would otherwise match inside other words ("join" in "joint").
    */
   strict?: boolean;
+  /** Posted (mentioning the member) when a submission is logged as this quest. */
+  reply?: string;
 }
 
-export type ChannelConfig = { id: string; mode: 'image' } | { id: string; mode: 'link'; questType: string };
+export type ChannelConfig =
+  | { id: string; mode: 'image' }
+  | { id: string; mode: 'link'; questType: string; reply?: string };
 
 export interface AppConfig {
   quests: Quest[];
@@ -291,7 +316,7 @@ function formatPath(path: PropertyKey[]): string {
 
 function toAppConfig(raw: RawConfig): AppConfig {
   return {
-    quests: raw.quests.map((q) => ({ keyword: q.keyword, type: q.type, strict: q.strict })),
+    quests: raw.quests.map((q) => ({ keyword: q.keyword, type: q.type, strict: q.strict, reply: q.reply })),
     fuzzyThreshold: raw.fuzzy_threshold,
     bind: {
       command: raw.bind.command,
@@ -302,7 +327,9 @@ function toAppConfig(raw: RawConfig): AppConfig {
       replies: raw.bind.replies,
     },
     channels: raw.channels.map((c) =>
-      c.mode === 'link' ? { id: c.id, mode: 'link', questType: c.quest_type } : { id: c.id, mode: 'image' },
+      c.mode === 'link'
+        ? { id: c.id, mode: 'link', questType: c.quest_type, reply: c.reply }
+        : { id: c.id, mode: 'image' },
     ),
     replies: { unmatched: raw.replies.unmatched, noImage: raw.replies.no_image, unbound: raw.replies.unbound },
     reactions: raw.reactions,

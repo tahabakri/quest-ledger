@@ -82,6 +82,29 @@ describe('config', () => {
     expect(strict.quests[0]?.strict).toBe(true);
   });
 
+  it('reads quest replies and link channel replies, absent by default', () => {
+    expect(parse(MINIMAL).quests[0]?.reply).toBeUndefined();
+    const withReply = parse(MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    reply: Nice!'));
+    expect(withReply.quests[0]?.reply).toBe('Nice!');
+
+    const link = parse(MINIMAL.replace('mode: image', 'mode: link\n    quest_type: shared_link\n    reply: Thanks!'));
+    expect(link.channels[0]).toEqual({ id: CHANNEL_A, mode: 'link', questType: 'shared_link', reply: 'Thanks!' });
+  });
+
+  it('lets aliases of one quest type share a reply, or give it to just one of them', () => {
+    const shared = parse(
+      MINIMAL.replace(
+        '    type: daily_check_in',
+        '    type: daily_check_in\n    reply: Same\n  - keyword: check in\n    type: daily_check_in\n    reply: Same',
+      ),
+    );
+    expect(shared.quests.map((q) => q.reply)).toEqual(['Same', 'Same']);
+    const oneOnly = parse(
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    reply: Same\n  - keyword: check in\n    type: daily_check_in'),
+    );
+    expect(oneOnly.quests.map((q) => q.reply)).toEqual(['Same', undefined]);
+  });
+
   it('keeps unquoted 19-digit channel IDs exact (no float rounding)', () => {
     const config = parse(MINIMAL.replace(`"${CHANNEL_A}"`, '1234567890123456789'));
     expect(config.channels[0]?.id).toBe('1234567890123456789');
@@ -140,8 +163,33 @@ describe('config', () => {
         'unbound: Run /bind first.',
         `unbound: "${'y'.repeat(900)}"`,
       ),
-      /replies: combined warnings can reach 2125 characters/,
+      /replies: combined replies can reach 2125 characters/,
     ],
+    [
+      'a quest reply that pushes the combined reply past the limit',
+      MINIMAL.replace('    type: daily_check_in', `    type: daily_check_in\n    reply: "${'z'.repeat(1300)}"`).replace(
+        'unbound: Run /bind first.',
+        `unbound: "${'y'.repeat(800)}"`,
+      ),
+      /replies: combined replies can reach 2125 characters/,
+    ],
+    [
+      'two different replies for one quest type',
+      MINIMAL.replace(
+        '    type: daily_check_in',
+        '    type: daily_check_in\n    reply: One\n  - keyword: check in\n    type: daily_check_in\n    reply: Two',
+      ),
+      /quests\[1\]\.reply: quest type "daily_check_in" already has a different reply/,
+    ],
+    [
+      "a link channel reply that clashes with a quest's reply of the same type",
+      MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    reply: One').replace(
+        'mode: image',
+        'mode: link\n    quest_type: daily_check_in\n    reply: Two',
+      ),
+      /channels\[0\]\.reply: quest type "daily_check_in" already has a different reply/,
+    ],
+    ['an empty reply', MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    reply: ""'), /quests\[0\]\.reply/],
   ])('rejects %s', (_label, text, expected) => {
     expect(configError(() => parse(text))).toMatch(expected);
   });

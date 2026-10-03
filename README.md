@@ -38,12 +38,12 @@ flowchart LR
 
 | Channel | Message | Row logged | Reaction | Reply (auto-deleted) |
 |---|---|---|---|---|
-| image | screenshot + caption matching a quest | quest type | ✅ | none |
-| image | screenshot + caption with a typo | quest type, `fuzzy_match = TRUE` | ✅ | none |
+| image | screenshot + caption matching a quest | quest type | ✅ | none, or the quest's own `reply` if it has one |
+| image | screenshot + caption with a typo | quest type, `fuzzy_match = TRUE` | ✅ | same as above |
 | image | screenshot + caption matching nothing | `unmatched`, full text kept | ❓ | "couldn't match this" |
 | image | quest caption, no screenshot | none | ❓ | "attach a screenshot" |
 | image | chat (no screenshot, no quest) | none | none | none |
-| link | contains an http(s) link | the channel's `quest_type` | ✅ | none |
+| link | contains an http(s) link | the channel's `quest_type` | ✅ | none, or the channel's own `reply` if set |
 | link | no link | none | none | none |
 | any | author never ran `/bind` | as above, `bound = FALSE` | as above | adds "run /bind first" |
 
@@ -163,7 +163,7 @@ Everything deployment-specific lives in `config.yml`, which is gitignored. [`con
 
 | Key | Default | Meaning |
 |---|---|---|
-| `quests` | required | List of `{ keyword, type, strict? }`. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. `strict: true` matches the keyword only as a whole word, with no typo tolerance: use it for short keywords such as `join`, which would otherwise match inside `joint`. |
+| `quests` | required | List of `{ keyword, type, strict?, reply? }`. `reply` is posted, mentioning the member, when a submission is logged as that quest (typo matches included); it joins any warning in one message, and one quest type has one wording. `type` is what lands in `quest_type`. Several keywords may share one type (aliases). Keywords must stay distinct after normalisation; `unmatched` is reserved. `strict: true` matches the keyword only as a whole word, with no typo tolerance: use it for short keywords such as `join`, which would otherwise match inside `joint`. |
 | `fuzzy_threshold` | `0.8` | Minimum Levenshtein ratio for a typo match, `0 < t <= 1`. `1` disables typo matching. |
 | `bind.command` | `bind` | Slash command name. |
 | `bind.command_description` | required | Shown in Discord's command picker. |
@@ -171,10 +171,10 @@ Everything deployment-specific lives in `config.yml`, which is gitignored. [`con
 | `bind.id_description` | required | Help text for that option. |
 | `bind.id_pattern` | `^\d{6,15}$` | Regular expression a valid ID must match. The value is trimmed first; full-width, Arabic-Indic and Persian digits count as digits. |
 | `bind.replies.success` / `.invalid` / `.error` | success and invalid required | Ephemeral replies to `/bind`. |
-| `channels` | required | List of `{ id, mode: image }` or `{ id, mode: link, quest_type }`. |
+| `channels` | required | List of `{ id, mode: image }` or `{ id, mode: link, quest_type, reply? }`. |
 | `replies.unmatched` / `.no_image` / `.unbound` | required | Warnings posted in the channel, mentioning the member. |
 | `reactions.success` / `.attention` | `✅` / `❓` | Unicode emoji, or a custom emoji as `<:name:id>`. |
-| `warning_delete_after_seconds` | `60` | Warnings are deleted after this long. `0` keeps them. |
+| `warning_delete_after_seconds` | `60` | Warnings and quest replies are deleted after this long. `0` keeps them. |
 | `image_extensions` | `[png, jpg, jpeg, gif, webp]` | Attachment types that count as a screenshot. |
 | `sheets.binds_tab` / `.submissions_tab` | `Binds` / `Submissions` | Tab names. |
 | `sheets.flush_interval_seconds` | `5` | Send queued rows at least this often... |

@@ -25,15 +25,16 @@ const PDF = { name: 'notes.pdf', url: 'https://cdn.example.com/notes.pdf', conte
 
 let messageId = 0;
 
-function setup(options: { record?: (entry: WalEntry) => boolean } = {}) {
+function setup(options: { record?: (entry: WalEntry) => boolean; cfg?: typeof config } = {}) {
+  const cfg = options.cfg ?? config;
   const binds = new BindStore();
   binds.apply(binds.prepare(BOUND_USER, 'member_a', '123456', new Date('2026-01-01T00:00:00Z')));
   const recorded: WalEntry[] = [];
-  const reaper = new WarningReaper(config.warningDeleteAfterSeconds * 1000, silentLogger);
+  const reaper = new WarningReaper(cfg.warningDeleteAfterSeconds * 1000, silentLogger);
   const handler = createMessageHandler({
-    config,
+    config: cfg,
     guildId: GUILD,
-    matcher: new QuestMatcher(config.quests, config.fuzzyThreshold),
+    matcher: new QuestMatcher(cfg.quests, cfg.fuzzyThreshold),
     binds,
     writer: {
       record: (entry) => {
@@ -242,6 +243,122 @@ describe('link channel', () => {
     await handler(msg);
     expect(rows()[0]).toMatchObject({ bound: false, uid: '' });
     expect(reply).toHaveBeenCalledWith(`<@${UNBOUND_USER}> ${config.replies.unbound}`);
+  });
+});
+
+// A config where some quests carry their own reply.
+const REPLY_CONFIG = parseConfig(
+  {
+    origin: 'replies',
+    text: `
+quests:
+  - keyword: daily check-in
+    type: daily_check_in
+    reply: Check-in logged. See you tomorrow!
+  - keyword: join
+    type: event_join
+    strict: true
+    reply: Welcome aboard!
+  - keyword: share post
+    type: share_post
+bind:
+  command_description: Link your account
+  id_label: uid
+  id_description: Your account ID
+  replies: { success: Linked., invalid: Invalid. }
+channels:
+  - id: "${IMAGE_CHANNEL}"
+    mode: image
+  - id: "${LINK_CHANNEL}"
+    mode: link
+    quest_type: content_link
+    reply: Thanks for sharing!
+replies:
+  unmatched: No match.
+  no_image: Attach a screenshot.
+  unbound: Run /bind first.
+`,
+  },
+  {},
+);
+
+describe('quest replies', () => {
+  const run = (overrides: Partial<IncomingMessage> = {}) => {
+    const { handler, rows, reaper } = setup({ cfg: REPLY_CONFIG });
+    const sent = message(overrides);
+    return { handler, rows, reaper, ...sent };
+  };
+
+  it('replies to a logged quest, mentioning the member, besides the reaction', async () => {
+    const { handler, msg, react, reply, rows } = run({ content: 'Daily Check-In' });
+    await handler(msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'daily_check_in' });
+    expect(react).toHaveBeenCalledWith('✅');
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Check-in logged. See you tomorrow!`);
+  });
+
+  it('stays silent for a quest that has no reply', async () => {
+    const { handler, msg, react, reply } = run({ content: 'share post' });
+    await handler(msg);
+    expect(react).toHaveBeenCalledWith('✅');
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('also replies when the quest was matched through a typo', async () => {
+    const { handler, msg, reply, rows } = run({ content: 'dayly check-in' });
+    await handler(msg);
+    expect(rows()[0]).toMatchObject({ quest_type: 'daily_check_in', fuzzy_match: true });
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Check-in logged. See you tomorrow!`);
+  });
+
+  it('puts the quest reply and the /bind reminder in one message', async () => {
+    const { handler, msg, reply } = run({ authorId: UNBOUND_USER, content: 'daily check-in' });
+    await handler(msg);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(`<@${UNBOUND_USER}> Check-in logged. See you tomorrow!\nRun /bind first.`);
+  });
+
+  it('gives an unmatched caption only its warning, never a quest reply', async () => {
+    const { handler, msg, reply } = run({ content: 'hello there' });
+    await handler(msg);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> No match.`);
+  });
+
+  it('gives a keyword without a screenshot only the warning, since nothing was logged', async () => {
+    const { handler, msg, reply, rows } = run({ attachments: [] });
+    await handler(msg);
+    expect(rows()).toHaveLength(0);
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Attach a screenshot.`);
+  });
+
+  it("replies in a link channel with that channel's reply", async () => {
+    const { handler, msg, react, reply } = run({ channelId: LINK_CHANNEL, content: 'https://example.com/post', attachments: [] });
+    await handler(msg);
+    expect(react).toHaveBeenCalledWith('✅');
+    expect(reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Thanks for sharing!`);
+  });
+
+  it('works with strict keywords: the whole word replies, a longer word does not', async () => {
+    const whole = run({ content: 'join' });
+    await whole.handler(whole.msg);
+    expect(whole.reply).toHaveBeenCalledWith(`<@${BOUND_USER}> Welcome aboard!`);
+
+    const inside = run({ content: 'joint' });
+    await inside.handler(inside.msg);
+    expect(inside.rows()[0]).toMatchObject({ quest_type: 'unmatched' });
+    expect(inside.reply).toHaveBeenCalledWith(`<@${BOUND_USER}> No match.`);
+  });
+
+  it('deletes the reply after warning_delete_after_seconds, like the warnings', async () => {
+    vi.useFakeTimers();
+    const { handler, msg, deleteReply } = run({ content: 'daily check-in' });
+    await handler(msg);
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(deleteReply).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(deleteReply).toHaveBeenCalledTimes(1);
   });
 });
 

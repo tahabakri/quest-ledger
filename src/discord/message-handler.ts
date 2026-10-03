@@ -90,7 +90,7 @@ export class WarningReaper {
 }
 
 interface HandlerDeps {
-  config: Pick<AppConfig, 'channels' | 'replies' | 'reactions' | 'imageExtensions'>;
+  config: Pick<AppConfig, 'quests' | 'channels' | 'replies' | 'reactions' | 'imageExtensions'>;
   guildId: string;
   matcher: QuestMatcher;
   binds: Pick<BindStore, 'lookup'>;
@@ -103,6 +103,10 @@ export function createMessageHandler(deps: HandlerDeps) {
   const { config, log } = deps;
   const channels = new Map<string, ChannelConfig>(config.channels.map((c) => [c.id, c]));
   const warningText: Record<WarningKey, string> = config.replies;
+  // The reply a quest type gets when a submission is logged (config guarantees one wording per type).
+  const questReplies = new Map<string, string>();
+  for (const quest of config.quests) if (quest.reply) questReplies.set(quest.type, quest.reply);
+  for (const channel of config.channels) if (channel.mode === 'link' && channel.reply) questReplies.set(channel.questType, channel.reply);
 
   return async (message: IncomingMessage): Promise<void> => {
     // Only new messages reach here: edits arrive as a different event and are ignored.
@@ -148,9 +152,16 @@ export function createMessageHandler(deps: HandlerDeps) {
     }
 
     await react(message, config.reactions[outcome.reaction], log);
-    if (outcome.warnings.length > 0) {
-      await warn(message, outcome.warnings.map((key) => warningText[key]), deps.reaper, log);
+
+    // One reply per message: the quest's own reply (matched quests and link channels only),
+    // then any warnings.
+    const lines: string[] = [];
+    if (outcome.action === 'log' && outcome.reaction === 'success') {
+      const questReply = questReplies.get(outcome.questType);
+      if (questReply) lines.push(questReply);
     }
+    lines.push(...outcome.warnings.map((key) => warningText[key]));
+    if (lines.length > 0) await warn(message, lines, deps.reaper, log);
   };
 }
 
