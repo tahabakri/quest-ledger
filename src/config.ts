@@ -83,6 +83,7 @@ const RawConfigSchema = z
       id_label: commandName,
       id_description: description,
       id_pattern: regexSource.default('^\\d{6,15}$'),
+      role_id: snowflake.optional(),
       replies: z.strictObject({
         success: replyText,
         invalid: replyText,
@@ -197,6 +198,8 @@ export interface AppConfig {
     idLabel: string;
     idDescription: string;
     idPattern: RegExp;
+    /** Role given to a member whenever their /bind succeeds. */
+    roleId?: string;
     replies: { success: string; invalid: string; error: string };
   };
   channels: ChannelConfig[];
@@ -337,6 +340,7 @@ function toAppConfig(raw: RawConfig): AppConfig {
       idLabel: raw.bind.id_label,
       idDescription: raw.bind.id_description,
       idPattern: new RegExp(raw.bind.id_pattern, 'u'),
+      roleId: raw.bind.role_id,
       replies: raw.bind.replies,
     },
     channels: raw.channels.map((c) =>

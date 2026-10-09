@@ -41,7 +41,7 @@ function interaction(user: { id: string; username: string }, value: string) {
   return { fake, reply };
 }
 
-function setup(record: (entry: WalEntry) => boolean = () => true) {
+function setup(record: (entry: WalEntry) => boolean = () => true, grantRole?: (userId: string) => Promise<void>) {
   const store = new BindStore();
   const recorded: WalEntry[] = [];
   const handler = createBindHandler({
@@ -55,6 +55,7 @@ function setup(record: (entry: WalEntry) => boolean = () => true) {
       },
     },
     log: silentLogger,
+    grantRole,
   });
   return { store, recorded, handler };
 }
@@ -143,5 +144,84 @@ describe('/bind', () => {
     const data = bindCommandData(config);
     expect(data.name).toBe('bind');
     expect(data.options).toEqual([expect.objectContaining({ name: 'uid', required: true, max_length: 100 })]);
+  });
+});
+
+describe('/bind role', () => {
+  it('gives the role after a successful bind, once the member has been answered', async () => {
+    const order: string[] = [];
+    const grant = vi.fn((userId: string) => {
+      order.push(`role:${userId}`);
+      return Promise.resolve();
+    });
+    const { handler } = setup(undefined, grant);
+    const { fake } = interaction(A, '766000123');
+    fake.reply = (options) => {
+      order.push(`reply:${options.content}`);
+      return Promise.resolve();
+    };
+    await handler(fake);
+    expect(grant).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['reply:Linked!', `role:${A.id}`]);
+  });
+
+  it('gives the role again on a re-bind, so a lost role comes back', async () => {
+    const grant = vi.fn((_userId: string) => Promise.resolve());
+    const { handler } = setup(undefined, grant);
+    await handler(interaction(A, '111111').fake);
+    await handler(interaction(A, '222222').fake);
+    expect(grant.mock.calls.map(([id]) => id)).toEqual([A.id, A.id]);
+  });
+
+  it('gives the role even when the bind is flagged as a duplicate ID', async () => {
+    const grant = vi.fn((_userId: string) => Promise.resolve());
+    const { handler } = setup(undefined, grant);
+    await handler(interaction(A, '555555').fake);
+    await handler(interaction(B, '555555').fake);
+    expect(grant.mock.calls.map(([id]) => id)).toEqual([A.id, B.id]);
+  });
+
+  it.each([
+    ['an invalid ID', '12ab34'],
+    ['an ID that is too short', '12345'],
+  ])('does not give the role for %s', async (_label, value) => {
+    const grant = vi.fn((_userId: string) => Promise.resolve());
+    const { handler } = setup(undefined, grant);
+    await handler(interaction(A, value).fake);
+    expect(grant).not.toHaveBeenCalled();
+  });
+
+  it('does not give the role when the bind could not be saved', async () => {
+    const grant = vi.fn((_userId: string) => Promise.resolve());
+    const { handler } = setup(() => {
+      throw new Error('disk full');
+    }, grant);
+    await handler(interaction(A, '123456').fake);
+    expect(grant).not.toHaveBeenCalled();
+  });
+
+  it('keeps the bind and the success reply when the role cannot be given', async () => {
+    const failure = Object.assign(new Error('Missing Permissions'), { code: 50013 });
+    const { store, handler } = setup(undefined, () => Promise.reject(failure));
+    const { fake, reply } = interaction(A, '123456');
+    await expect(handler(fake)).resolves.toBeUndefined();
+    expect(reply).toHaveBeenCalledWith({ content: 'Linked!', flags: MessageFlags.Ephemeral });
+    expect(store.lookup(A.id)?.uid).toBe('123456');
+  });
+
+  it('still tries the role if the reply itself fails, and still reports that failure', async () => {
+    const grant = vi.fn((_userId: string) => Promise.resolve());
+    const { handler } = setup(undefined, grant);
+    const { fake } = interaction(A, '123456');
+    fake.reply = () => Promise.reject(new Error('Unknown interaction'));
+    await expect(handler(fake)).rejects.toThrow('Unknown interaction');
+    expect(grant).toHaveBeenCalledTimes(1);
+  });
+
+  it('works without a role configured', async () => {
+    const { handler } = setup();
+    const { fake, reply } = interaction(A, '123456');
+    await expect(handler(fake)).resolves.toBeUndefined();
+    expect(reply).toHaveBeenCalledTimes(1);
   });
 });

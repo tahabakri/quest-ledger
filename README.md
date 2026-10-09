@@ -136,6 +136,17 @@ You need Node.js 22.12 or newer, a Discord server you manage, and a Google accou
 
 At startup the bot registers `/bind` as a server command in `GUILD_ID`, so it appears immediately. It also logs a line for each watched channel: either `watching #name`, or the reason it can't (the channel wasn't found, or a named permission is missing).
 
+### Giving a role when a member binds (optional)
+
+Set `bind.role_id` and every member whose `/bind` succeeds gets that role, again on a re-bind, so a lost role comes back. For this the bot needs:
+
+- the **Manage Roles** permission (add it to the invite: the permissions number becomes `275146411072`), and
+- its own highest role **above** the role it hands out, in **Server Settings > Roles**. A bot can only manage roles below its own.
+
+At startup the log says either `will give the "<role>" role when a member binds` or exactly what is missing. A bind is always saved and confirmed, even if the role can't be given; the failure is logged with the fix.
+
+Two cautions. `/bind` does not verify the ID, so anyone can bind any number that fits the pattern: the role shows who joined, not who did what, so don't hang rewards or access on it. And Manage Roles is a strong permission: give the bot a role that has only the permissions it needs, and keep that role below your moderators and admins, so a leaked bot token can't reach them.
+
 ### 2. Google service account
 
 1. In the [Google Cloud Console](https://console.cloud.google.com/), create a project (or pick one) and enable the **Google Sheets API** under **APIs & Services > Library**.
@@ -172,6 +183,7 @@ Everything deployment-specific lives in `config.yml`, which is gitignored. [`con
 | `bind.id_label` | required | The option members fill in, e.g. `uid` for `/bind uid:123456`. Lowercase. |
 | `bind.id_description` | required | Help text for that option. |
 | `bind.id_pattern` | `^\d{6,15}$` | Regular expression a valid ID must match. The value is trimmed first; full-width, Arabic-Indic and Persian digits count as digits. |
+| `bind.role_id` | none | ID of a role to give a member when their `/bind` succeeds. See [Giving a role when a member binds](#giving-a-role-when-a-member-binds-optional). |
 | `bind.replies.success` / `.invalid` / `.error` | success and invalid required | Ephemeral replies to `/bind`. |
 | `channels` | required | List of `{ id, mode: image }` or `{ id, mode: link, quest_type, reply? }`. |
 | `replies.unmatched` / `.no_image` / `.unbound` | required | Warnings posted in the channel, mentioning the member. |

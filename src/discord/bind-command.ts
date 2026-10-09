@@ -4,6 +4,7 @@ import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import type { BindRow } from '../sheets/schema.js';
 import type { SheetWriter } from '../writer.js';
+import { roleGrantHint } from './roles.js';
 
 type BindConfig = AppConfig['bind'];
 
@@ -33,13 +34,28 @@ interface BindDeps {
   store: BindStore;
   writer: Pick<SheetWriter, 'record'>;
   log: Logger;
+  /** Gives a member the bind role (config bind.role_id). Left out when no role is configured. */
+  grantRole?: (userId: string) => Promise<void>;
 }
 
 /**
  * /bind <id>: validates the ID, then records the bind durably before confirming.
- * Every reply is ephemeral, since IDs are semi-private.
+ * Every reply is ephemeral, since IDs are semi-private. A successful bind also
+ * gives the member the configured role, if any.
  */
-export function createBindHandler({ config, store, writer, log }: BindDeps) {
+export function createBindHandler({ config, store, writer, log, grantRole }: BindDeps) {
+  /** The role is a bonus on top of a saved bind: a failure is logged and never reaches the member. */
+  const giveRole = async (userId: string): Promise<void> => {
+    if (!grantRole) return;
+    try {
+      await grantRole(userId);
+      log.info('bind role given', { user: userId });
+    } catch (err) {
+      const hint = roleGrantHint(err);
+      log.error(`could not give the bind role${hint ? `: ${hint}` : ''}`, { user: userId, err });
+    }
+  };
+
   return async (interaction: BindInteraction): Promise<void> => {
     const user = interaction.user;
     const id = normalizeBindId(interaction.options.getString(config.idLabel, true));
@@ -61,7 +77,12 @@ export function createBindHandler({ config, store, writer, log }: BindDeps) {
     }
 
     log.info('bind saved', { user: user.id, duplicateUid: row.duplicate_uid });
-    await ephemeral(interaction, config.replies.success);
+    try {
+      // Confirm first: Discord wants an answer within seconds, and the role call can be slow.
+      await ephemeral(interaction, config.replies.success);
+    } finally {
+      await giveRole(user.id);
+    }
   };
 }
 

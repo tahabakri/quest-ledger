@@ -1,10 +1,11 @@
 import { join } from 'node:path';
-import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Routes } from 'discord.js';
 import { BindStore, keepBindsFresh } from './binds.js';
 import { ConfigError, loadConfig } from './config.js';
 import { bindCommandData, createBindHandler, ephemeral } from './discord/bind-command.js';
 import { checkWatchedChannels } from './discord/channel-check.js';
 import { WarningReaper, createMessageHandler, fromDiscordMessage } from './discord/message-handler.js';
+import { checkBindRole } from './discord/roles.js';
 import { loadDotEnv, readDiscordEnv, readRuntimeEnv, readSheetsEnv } from './env.js';
 import { LockError, acquireDataLock } from './lock.js';
 import { createLogger, describeError } from './logger.js';
@@ -73,7 +74,16 @@ async function main(): Promise<void> {
     // Bot messages never ping @everyone, roles or users unless a reply opts in.
     allowedMentions: { parse: [] },
   });
-  const handleBind = createBindHandler({ config: config.bind, store: binds, writer, log: log.child('bind') });
+  // A successful /bind also gives the member this role (optional; needs Manage Roles).
+  const bindRoleId = config.bind.roleId;
+  const grantRole = bindRoleId
+    ? async (userId: string): Promise<void> => {
+        await client.rest.put(Routes.guildMemberRole(discordEnv.guildId, userId, bindRoleId), {
+          reason: 'Linked their account ID with /bind',
+        });
+      }
+    : undefined;
+  const handleBind = createBindHandler({ config: config.bind, store: binds, writer, log: log.child('bind'), grantRole });
   const reaper = new WarningReaper(config.warningDeleteAfterSeconds * 1000, log);
   const handleMessage = createMessageHandler({
     config,
@@ -88,6 +98,12 @@ async function main(): Promise<void> {
   client.once(Events.ClientReady, (ready) => {
     log.info('connected to Discord', { as: ready.user.tag });
     void checkWatchedChannels(ready, config.channels, discordEnv.guildId, log);
+    if (bindRoleId) {
+      ready.guilds.fetch(discordEnv.guildId).then(
+        (guild) => checkBindRole(guild, bindRoleId, log),
+        (err: unknown) => log.warn('could not check the bind role', { err }),
+      );
+    }
     ready.application.commands.set([bindCommandData(config.bind)], discordEnv.guildId).then(
       () => log.info(`registered /${config.bind.command}`, { guild: discordEnv.guildId }),
       (err: unknown) =>

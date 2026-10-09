@@ -38,6 +38,7 @@ bind:
   id_label: uid # -> /bind uid:<value>
   id_description: Your account ID (6-15 digits)
   id_pattern: '^\d{6,15}$'
+  # role_id: '${MEMBER_ROLE_ID}' # optional: a role given when /bind succeeds (needs Manage Roles)
   replies: # always sent ephemerally (only the member sees them)
     success: Your account ID has been linked. You're all set.
     invalid: That doesn't look like a valid account ID. It should be 6-15 digits, numbers only.

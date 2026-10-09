@@ -82,6 +82,21 @@ describe('config', () => {
     expect(strict.quests[0]?.strict).toBe(true);
   });
 
+  it('reads the optional bind role, as an ID or a ${VAR}', () => {
+    expect(parse(MINIMAL).bind.roleId).toBeUndefined();
+    expect(parse(MINIMAL.replace('  id_label: uid', '  id_label: uid\n  role_id: "555555555555555555"')).bind.roleId).toBe(
+      '555555555555555555',
+    );
+    // unquoted 18-digit IDs must not lose precision
+    expect(parse(MINIMAL.replace('  id_label: uid', '  id_label: uid\n  role_id: 1234567890123456789')).bind.roleId).toBe(
+      '1234567890123456789',
+    );
+    expect(
+      parse(MINIMAL.replace('  id_label: uid', '  id_label: uid\n  role_id: "${MEMBER_ROLE}"'), { MEMBER_ROLE: '555555555555555555' })
+        .bind.roleId,
+    ).toBe('555555555555555555');
+  });
+
   it('reads the per-quest review flag, off by default', () => {
     expect(parse(MINIMAL).quests[0]?.review).toBe(false);
     const flagged = parse(MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    review: true'));
@@ -166,6 +181,11 @@ describe('config', () => {
       'a review flag that is not true or false',
       MINIMAL.replace('    type: daily_check_in', '    type: daily_check_in\n    review: sometimes'),
       /quests\[0\]\.review/,
+    ],
+    [
+      'a bind role that is not a Discord ID',
+      MINIMAL.replace('  id_label: uid', '  id_label: uid\n  role_id: Member'),
+      /bind\.role_id: must be a Discord ID/,
     ],
     ['invalid YAML', 'quests: [unclosed', /invalid YAML/],
     [
